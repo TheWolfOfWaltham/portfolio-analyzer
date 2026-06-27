@@ -3,201 +3,230 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Portfolio Analyzer — AI Infrastructure</title>
+<title>Wolf // Portfolio Analyzer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --ink:#1a1a18;--muted:#5a5a56;--hint:#999890;
-  --surface:#f4f3ef;--card:#ffffff;--page:#faf9f6;
-  --rule:rgba(0,0,0,0.10);--rule2:rgba(0,0,0,0.20);
-  --green:#1a6641;--green-bg:#e6f4ed;--green-border:rgba(26,102,65,0.25);
-  --red:#a32d2d;--red-bg:#fdf0f0;
-  --amber:#7a4d0a;--amber-bg:#fef5e6;
-  --blue:#185fa5;--blue-bg:#e8f2fc;--blue-border:rgba(24,95,165,0.25);
-  --accent:#1565c0;
+  --bg:#111118;--bg-card:#16141f;--bg-deep:#0d0d13;
+  --border:#2a2040;--border-soft:rgba(220,215,255,0.18);
+  --purple:#6b3aff;--purple-mid:#9b6dff;--purple-light:#c084ff;
+  --text:#e8e6f0;--text-muted:#7a7090;--text-dim:#5a5270;--text-faint:#3d3555;
+  --green:#4ade80;--red:#f87171;--blue:#7b8fff;--amber:#fbbf24;
+  --teal:#2dd4bf;--lime:#a3e635;--slate:#94a3b8;--orange:#fb923c;--rose:#f43f5e;
 }
-html{background:var(--page);min-height:100vh}
-body{font-family:'Instrument Sans',sans-serif;font-size:13px;color:var(--ink);line-height:1.5;padding:0 0 80px}
+html{background:var(--bg);min-height:100vh}
+body{font-family:'Space Grotesk',sans-serif;font-size:13px;color:var(--text);line-height:1.5;padding:0 0 80px}
 
-/* ── NAV ── */
-nav{background:var(--ink);padding:0 40px;display:flex;align-items:center;justify-content:space-between;height:52px;position:sticky;top:0;z-index:100}
-.nav-brand{font-family:'DM Mono',monospace;font-size:13px;color:#fff;letter-spacing:.04em}
-.nav-sub{font-size:11px;color:#9e9c96;margin-left:14px}
-.nav-right{font-size:11px;color:#9e9c96}
+/* NAV */
+nav{background:var(--bg-deep);border-bottom:1px solid var(--border);padding:0 32px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.nav-brand{font-size:13px;font-weight:800;letter-spacing:.1em;color:#fff;text-transform:uppercase}
+.nav-brand span{color:var(--purple-mid)}
+.nav-right{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace}
 
-/* ── HERO ── */
-.hero{background:var(--ink);color:#fff;padding:52px 40px 44px;border-bottom:3px solid #e0ddd8}
-.hero-eyebrow{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.12em;color:#9e9c96;text-transform:uppercase;margin-bottom:12px}
-.hero h1{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1.15;margin-bottom:10px}
-.hero h1 em{font-style:italic;color:#b8c5d8}
-.hero-sub{font-size:13px;color:#9e9c96;max-width:580px}
+/* HERO */
+.hero{background:var(--bg-deep);padding:44px 32px 40px;position:relative;overflow:hidden;border-bottom:1px solid #1e1830}
+.hero-geo{position:absolute;top:0;right:0;width:55%;height:100%;opacity:.18;pointer-events:none}
+.hero-geo-inner{width:100%;height:100%;background:linear-gradient(135deg,transparent 30%,#6b3aff 50%,transparent 55%),linear-gradient(135deg,transparent 45%,#9b6dff 60%,transparent 65%),linear-gradient(135deg,transparent 60%,#c084ff 72%,transparent 77%)}
+.hero-accent-line{position:absolute;top:0;right:28%;width:1px;height:100%;background:linear-gradient(to bottom,transparent,#6b3aff,transparent);opacity:.4}
+.hero-eyebrow{font-size:10px;font-weight:700;letter-spacing:.18em;color:var(--purple);text-transform:uppercase;margin-bottom:14px}
+.hero h1{font-size:38px;font-weight:800;line-height:1.1;margin-bottom:10px;letter-spacing:-.02em}
+.hero h1 em{font-style:normal;color:var(--purple-mid)}
+.hero-sub{font-size:13px;color:var(--text-muted);max-width:480px;line-height:1.6;font-weight:500;margin-bottom:30px}
+.info-blocks{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;position:relative;z-index:1}
+.info-block{background:rgba(255,255,255,0.03);border:1px solid var(--border-soft);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.info-block-num{font-size:11px;font-weight:700;color:var(--purple-mid);letter-spacing:.06em;font-family:'Space Grotesk',sans-serif}
+.info-block-title{font-size:13px;font-weight:800;color:rgba(240,238,255,.92);line-height:1.3;letter-spacing:-.01em}
+.info-block-body{font-size:11px;font-weight:500;color:rgba(200,195,230,.55);line-height:1.6}
 
-/* ── MAIN LAYOUT ── */
-.main{max-width:1200px;margin:0 auto;padding:40px 40px 0}
+/* MAIN */
+.main{max-width:1200px;margin:0 auto;padding:32px 32px 0}
 
-/* ── INPUT CARD ── */
-.input-card{background:var(--card);border:0.5px solid var(--rule2);border-radius:8px;padding:32px 36px;margin-bottom:28px;box-shadow:0 2px 12px rgba(0,0,0,.05)}
-.input-card h2{font-family:'DM Serif Display',serif;font-size:20px;font-weight:400;margin-bottom:20px;border-bottom:0.5px solid var(--rule2);padding-bottom:12px}
-.input-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
-.field-group{display:flex;flex-direction:column;gap:6px}
-.field-group label{font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.field-group input,.field-group select{padding:9px 12px;border:1px solid #d0cfc9;border-radius:5px;font-family:'Instrument Sans',sans-serif;font-size:13px;color:var(--ink);background:#fff;width:100%;outline:none;transition:border-color .15s}
-.field-group input:focus,.field-group select:focus{border-color:var(--accent)}
+/* INPUT CARD */
+.input-card{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:26px;margin-bottom:24px;position:relative;overflow:hidden}
+.input-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--purple),transparent)}
+.input-card h2{font-size:15px;font-weight:800;margin-bottom:20px;color:var(--text)}
+.input-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:0}
+.field-group{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.field-label{font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.1em}
+.field-input-styled{background:var(--bg-deep);border:1px solid var(--border);border-radius:8px;padding:9px 13px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;color:var(--text);width:100%;outline:none;transition:border-color .15s}
+.field-input-styled:focus{border-color:var(--purple)}
+.ticker-row{display:flex;gap:6px;flex-wrap:wrap;background:var(--bg-deep);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-height:46px;align-items:center;cursor:text;transition:border-color .15s}
+.ticker-row:focus-within{border-color:var(--purple)}
+.ticker-chip{display:inline-flex;align-items:center;gap:5px;border-radius:7px;padding:5px 12px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;letter-spacing:.01em}
+.ticker-chip button{background:none;border:none;cursor:pointer;font-size:11px;opacity:.55;line-height:1;padding:0;color:inherit;font-family:'Space Grotesk',sans-serif}
+.ticker-chip button:hover{opacity:1}
+.ticker-input-field{border:none;outline:none;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;background:transparent;color:var(--text);min-width:80px;flex:1;padding:2px 4px}
+.mode-tabs{display:flex;background:var(--bg-deep);border:1px solid var(--border);border-radius:8px;overflow:hidden;width:100%}
+.mode-tab{padding:9px 0;font-size:12px;font-weight:700;cursor:pointer;color:var(--text-dim);border:none;background:none;font-family:'Space Grotesk',sans-serif;letter-spacing:.02em;flex:1;white-space:nowrap;transition:all .15s}
+.mode-tab.active{background:var(--purple);color:#fff}
+.btn-row{display:flex;gap:8px;margin-top:20px;flex-wrap:wrap}
+.btn{padding:11px 22px;border-radius:8px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:800;cursor:pointer;border:none;letter-spacing:.02em;white-space:nowrap;transition:opacity .15s}
+.btn:hover{opacity:.88}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:linear-gradient(135deg,var(--purple),var(--purple-mid));color:#fff}
+.btn-smart{background:#1e0a3c;color:var(--purple-mid);border:1px solid #3d1a7a}
+.btn-outline{background:transparent;color:var(--text-dim);border:1px solid var(--border)}
 
-.ticker-row{display:flex;flex-wrap:wrap;gap:6px;min-height:36px;padding:8px;border:1px solid #d0cfc9;border-radius:5px;background:#fff;cursor:text}
-.ticker-chip{display:inline-flex;align-items:center;gap:4px;background:var(--ink);color:#fff;border-radius:4px;padding:3px 10px;font-family:'DM Mono',monospace;font-size:11px;font-weight:500}
-.ticker-chip button{background:none;border:none;color:#aaa;cursor:pointer;font-size:12px;line-height:1;padding:0 0 0 2px}
-.ticker-chip button:hover{color:#fff}
-.ticker-input-field{border:none;outline:none;font-family:'DM Mono',monospace;font-size:12px;min-width:80px;flex:1;padding:2px 4px}
-
-.btn-row{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
-.btn{padding:10px 22px;border-radius:5px;font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;border:1px solid transparent}
-.btn-primary{background:var(--ink);color:#fff}
-.btn-primary:hover{background:#2c2c28}
-.btn-primary:disabled{opacity:.5;cursor:not-allowed}
-.btn-outline{background:#fff;color:var(--ink);border-color:#c0bfb8}
-.btn-outline:hover{background:var(--surface)}
-.btn-smart{background:var(--blue-bg);color:var(--blue);border-color:var(--blue-border)}
-.btn-smart:hover{background:#d4e8f8}
-
-.mode-tabs{display:flex;gap:0;border:1px solid #d0cfc9;border-radius:5px;overflow:hidden;width:fit-content}
-.mode-tab{padding:8px 16px;font-size:12px;font-weight:500;cursor:pointer;background:#fff;color:var(--muted);border:none;transition:all .15s}
-.mode-tab.active{background:var(--ink);color:#fff}
-
-/* ── STATUS ── */
-.status-bar{background:var(--amber-bg);border:1px solid rgba(122,77,10,.2);border-radius:6px;padding:12px 16px;font-size:13px;color:var(--amber);margin-bottom:24px;display:none}
-.status-bar.visible{display:flex;align-items:center;gap:10px}
-.spinner{width:16px;height:16px;border:2px solid rgba(122,77,10,.3);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+/* STATUS */
+.status-bar{background:#1a1200;border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:12px 16px;font-size:13px;font-weight:600;color:var(--amber);margin-bottom:20px;display:none;align-items:center;gap:10px}
+.status-bar.visible{display:flex}
+.status-bar.err{background:#1f0a0a;border-color:rgba(248,113,113,.2);color:var(--red)}
+.spinner{width:16px;height:16px;border:2px solid rgba(251,191,36,.3);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+.err .spinner{display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-.status-err{background:var(--red-bg);border-color:rgba(163,45,45,.2);color:var(--red)}
 
-/* ── KPI STRIP ── */
-.kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:28px}
-.kpi{background:var(--card);border:0.5px solid var(--rule2);border-radius:7px;padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
-.kpi-label{font-size:10px;font-weight:500;color:var(--hint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
-.kpi-val{font-family:'DM Serif Display',serif;font-size:24px;font-weight:400;line-height:1}
-.kpi-sub{font-size:10px;color:var(--muted);margin-top:3px}
+/* KPI */
+.kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:24px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;position:relative;overflow:hidden}
+.kpi::after{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--purple)}
+.kpi-label{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+.kpi-val{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.kpi-sub{font-size:10px;color:var(--text-faint);margin-top:4px;font-family:'DM Mono',monospace}
 .kpi-green .kpi-val{color:var(--green)}
+.kpi-purple .kpi-val{color:var(--purple-mid)}
 .kpi-red .kpi-val{color:var(--red)}
-.kpi-blue .kpi-val{color:var(--blue)}
 
-/* ── SECTION ── */
-.section{margin-bottom:32px}
-.section-title{font-family:'DM Serif Display',serif;font-size:18px;font-weight:400;margin-bottom:16px;display:flex;align-items:center;gap:10px}
-.section-title::after{content:'';flex:1;height:0.5px;background:var(--rule2)}
+/* SECTION */
+.section{margin-bottom:28px}
+.section-title{font-size:10px;font-weight:800;color:var(--purple);text-transform:uppercase;letter-spacing:.14em;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+.section-title::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
 
-/* ── CHARTS GRID ── */
-.charts-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
-.charts-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:28px}
-.chart-card{background:var(--card);border:0.5px solid var(--rule2);border-radius:8px;padding:24px;box-shadow:0 1px 6px rgba(0,0,0,.04)}
-.chart-card h3{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px}
+/* CHART CARDS */
+.charts-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.charts-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.chart-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px}
+.chart-card h3{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px}
 .chart-wrap{position:relative}
 
-/* ── POSITION TABLE ── */
+/* STACKED HISTOGRAM */
+.stacked-bar{display:flex;width:100%;height:72px;border-radius:10px;overflow:hidden;gap:2px}
+.seg{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px}
+.seg-pct{font-size:13px;font-weight:800;color:#fff;line-height:1;font-family:'Space Grotesk',sans-serif}
+.seg-ticker{font-size:9px;font-weight:700;color:rgba(255,255,255,.6);font-family:'Space Grotesk',sans-serif;letter-spacing:.04em}
+.seg-sm .seg-pct{font-size:10px}
+.legend-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--text-muted)}
+.legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+
+/* POSITION TABLE */
 .pos-table{width:100%;border-collapse:collapse;font-size:12px}
-.pos-table th{text-align:left;padding:8px 10px;font-size:10px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--rule2)}
-.pos-table td{padding:9px 10px;border-bottom:0.5px solid var(--rule)}
+.pos-table th{text-align:left;padding:8px 10px;font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border)}
+.pos-table td{padding:10px 10px;border-bottom:1px solid rgba(42,32,64,.5)}
 .pos-table tr:last-child td{border-bottom:none}
-.pos-table tr:hover td{background:var(--surface)}
-.ticker-cell{font-family:'DM Mono',monospace;font-weight:500;font-size:12px}
-.bar-cell{display:flex;align-items:center;gap:8px}
-.bar-bg{flex:1;height:5px;background:#eeecea;border-radius:3px;overflow:hidden}
-.bar-fill{height:100%;border-radius:3px}
-.tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:3px;font-weight:500}
-.tag-high{background:#fef3e0;color:#7a4d0a}
-.tag-med{background:var(--blue-bg);color:var(--blue)}
-.tag-low{background:var(--green-bg);color:var(--green)}
+.pos-table tr:hover td{background:rgba(107,58,255,.04)}
+.ticker-cell{font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:13px}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;font-family:'Space Grotesk',sans-serif}
+.tag-high{background:rgba(248,113,113,.15);color:var(--red)}
+.tag-med{background:rgba(251,191,36,.15);color:var(--amber)}
+.tag-low{background:rgba(74,222,128,.15);color:var(--green)}
 
-/* ── SCENARIOS ── */
-.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
-.scenario-card{border-radius:8px;padding:24px;border:1px solid rgba(0,0,0,.08)}
-.sc-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;opacity:.7}
-.sc-total{font-family:'DM Serif Display',serif;font-size:32px;margin-bottom:4px}
-.sc-sub{font-size:11px;opacity:.65;margin-bottom:16px}
-.sc-row{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:0.5px solid rgba(0,0,0,.07)}
-.sc-row:last-child{border-bottom:none}
-.sc-ticker{font-family:'DM Mono',monospace;font-weight:500}
-.sc-breakdown{margin-top:12px;background:rgba(0,0,0,.04);border-radius:5px;padding:10px 12px}
-.sc-breakdown-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;opacity:.6}
+/* SCENARIOS */
+.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.scenario-card{border-radius:12px;padding:22px;position:relative;overflow:hidden}
+.scenario-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px}
+.sc-bull{background:#0a1f0f;border:1px solid #1a3d25}
+.sc-bull::before{background:linear-gradient(90deg,transparent,var(--green),transparent)}
+.sc-base{background:#0d0d1f;border:1px solid #2a2a5a}
+.sc-base::before{background:linear-gradient(90deg,transparent,var(--blue),transparent)}
+.sc-bear{background:#1f0a0a;border:1px solid #3d1515}
+.sc-bear::before{background:linear-gradient(90deg,transparent,var(--red),transparent)}
+.sc-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;opacity:.7}
+.sc-total{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-bottom:4px}
+.sc-sub{font-size:11px;opacity:.5;font-family:'DM Mono',monospace;margin-bottom:14px}
+.sc-rows{border-top:1px solid rgba(255,255,255,.06);padding-top:12px;display:flex;flex-direction:column;gap:5px}
+.sc-row{display:flex;justify-content:space-between;font-size:11px;font-weight:600}
+.sc-row-lbl{opacity:.45}
+.sc-contrib{font-size:10px;margin-top:8px;opacity:.4;font-family:'DM Mono',monospace}
 
-/* ── CORR MATRIX ── */
+/* CORR */
 .corr-wrap{overflow-x:auto}
-.corr-table{border-collapse:collapse;font-size:11px}
-.corr-table td,.corr-table th{width:52px;height:30px;text-align:center;border:none;font-size:10px}
-.corr-table th{color:var(--muted);font-family:'DM Mono',monospace;font-weight:500}
-.corr-table .row-lbl{color:var(--muted);font-family:'DM Mono',monospace;font-weight:500;text-align:right;padding-right:6px;width:54px}
+.corr-table{border-collapse:collapse;font-size:10px}
+.corr-table td,.corr-table th{width:52px;height:30px;text-align:center;border:none}
+.corr-table th{color:var(--text-dim);font-family:'Space Grotesk',monospace;font-weight:700;font-size:10px}
+.corr-table .row-lbl{color:var(--text-dim);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:10px;text-align:right;padding-right:6px;width:54px}
 
-/* ── SMART PANEL ── */
-.smart-panel{background:var(--card);border:0.5px solid var(--blue-border);border-radius:8px;padding:28px;margin-bottom:28px;box-shadow:0 1px 6px rgba(24,95,165,.06);display:none}
+/* SMART PANEL */
+.smart-panel{background:var(--bg-card);border:1px solid rgba(107,58,255,.35);border-radius:12px;padding:26px;margin-bottom:24px;display:none;position:relative;overflow:hidden}
+.smart-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--purple),transparent)}
 .smart-panel.visible{display:block}
-.smart-panel h3{font-family:'DM Serif Display',serif;font-size:18px;margin-bottom:6px}
-.smart-panel p{font-size:12px;color:var(--muted);margin-bottom:20px}
+.smart-panel h3{font-size:16px;font-weight:800;margin-bottom:6px}
+.smart-panel p{font-size:12px;color:var(--text-muted);margin-bottom:20px}
 .smart-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-.smart-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}
-.smart-card{background:var(--surface);border-radius:6px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.smart-card-left .sc-ticker{font-size:13px;margin-bottom:2px}
-.smart-desc{font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:4px}
-.smart-rationale{font-size:10px;color:var(--blue);font-style:italic}
-.smart-stats{text-align:right;flex-shrink:0}
-.smart-ret{font-size:13px;font-weight:600;color:var(--green)}
-.smart-vol{font-size:10px;color:var(--muted)}
-.btn-add-ticker{background:var(--ink);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:10px;cursor:pointer;margin-top:6px;font-family:'Instrument Sans',sans-serif}
-.warning-list{margin-bottom:16px}
-.warning-item{background:var(--amber-bg);border:1px solid rgba(122,77,10,.15);border-radius:5px;padding:10px 14px;font-size:12px;color:var(--amber);margin-bottom:6px;display:flex;gap:8px}
-.warning-item::before{content:'⚠';flex-shrink:0}
+.smart-section-title{font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
+.smart-card{background:var(--bg-deep);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.smart-ticker{font-size:14px;font-weight:800;margin-bottom:3px}
+.smart-desc{font-size:11px;color:var(--text-muted);line-height:1.4;margin-bottom:4px;font-weight:500}
+.smart-rationale{font-size:10px;color:var(--purple-mid);font-style:italic}
+.smart-ret{font-size:13px;font-weight:800;color:var(--green);text-align:right}
+.smart-vol{font-size:10px;color:var(--text-dim);text-align:right;font-family:'DM Mono',monospace}
+.btn-add{background:var(--purple);color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer;margin-top:6px;font-family:'Space Grotesk',sans-serif}
+.warning-item{background:#1a1200;border:1px solid rgba(251,191,36,.2);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--amber);margin-bottom:6px;font-weight:600}
 
-/* ── RESULTS (hidden initially) ── */
 #results{display:none}
 #results.visible{display:block}
+.note-bar{background:rgba(107,58,255,.1);border:1px solid rgba(107,58,255,.25);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--purple-mid);font-weight:600;margin-bottom:20px}
 
-/* ── FOOTER ── */
-.disclaimer{font-size:10px;color:var(--hint);text-align:center;padding:24px 40px;border-top:0.5px solid var(--rule2);max-width:1200px;margin:40px auto 0;line-height:1.6}
+.disclaimer{font-size:10px;color:var(--text-faint);text-align:center;padding:24px 32px;border-top:1px solid var(--border);max-width:1200px;margin:40px auto 0;line-height:1.7;font-weight:500}
 
 @media(max-width:900px){
   .kpi-strip{grid-template-columns:repeat(3,1fr)}
-  .charts-2,.charts-3,.scenario-grid,.smart-cols{grid-template-columns:1fr}
+  .charts-2,.charts-3,.scenario-grid,.smart-cols,.info-blocks{grid-template-columns:1fr}
+  .main{padding:20px 16px 0}
+  .hero{padding:32px 16px 28px}
+  nav{padding:0 16px}
   .input-grid{grid-template-columns:1fr}
-  .main{padding:24px 20px 0}
-  .hero{padding:36px 20px 30px}
-  nav{padding:0 20px}
 }
 </style>
 </head>
 <body>
 
 <nav>
-  <div style="display:flex;align-items:center">
-    <span class="nav-brand">PORTFOLIO ANALYZER</span>
-    <span class="nav-sub">/ AI Infrastructure · Quantitative Risk Tools</span>
-  </div>
-  <span class="nav-right">Data via Yahoo Finance · Built with Flask + Python</span>
+  <span class="nav-brand">WOLF<span>//</span>PORTFOLIO</span>
+  <span class="nav-right">AI INFRASTRUCTURE · QUANTITATIVE ANALYTICS</span>
 </nav>
 
 <div class="hero">
+  <div class="hero-geo"><div class="hero-geo-inner"></div></div>
+  <div class="hero-accent-line"></div>
   <div class="hero-eyebrow">Quantitative Portfolio Analysis</div>
   <h1>Build smarter.<br><em>Invest with conviction.</em></h1>
-  <p class="hero-sub">Enter your tickers and capital. Get real Sharpe ratios, Monte Carlo simulations, efficient frontiers, correlation matrices, and 3-year scenario analysis — all computed live from market data.</p>
+  <p class="hero-sub">Real Sharpe ratios, Monte Carlo simulations, efficient frontiers — computed live from market data.</p>
+  <div class="info-blocks">
+    <div class="info-block">
+      <div class="info-block-num">01 — Optimize</div>
+      <div class="info-block-title">Risk-reward optimization with institutional-grade tools</div>
+      <div class="info-block-body">Maximize your Sharpe ratio, minimize portfolio volatility, or equalize risk contributions across every position with one click.</div>
+    </div>
+    <div class="info-block">
+      <div class="info-block-num">02 — Visualize</div>
+      <div class="info-block-title">See your returns across the efficient frontier</div>
+      <div class="info-block-body">Plot your portfolio on the efficient frontier and run 200-path Monte Carlo simulations to understand the full range of 3-year outcomes.</div>
+    </div>
+    <div class="info-block">
+      <div class="info-block-num">03 — Expand</div>
+      <div class="info-block-title">Discover complementary stocks with Smart Suggestions</div>
+      <div class="info-block-body">Hit Smart Suggestions to get AI-curated picks — adjacent AI infrastructure plays and blue-chip diversifiers that strengthen your book.</div>
+    </div>
+  </div>
 </div>
 
 <div class="main">
 
-  <!-- ── INPUT CARD ── -->
   <div class="input-card">
     <h2>Portfolio Setup</h2>
     <div class="input-grid">
       <div>
-        <div class="field-group" style="margin-bottom:16px">
-          <label>Tickers — type and press Enter or comma</label>
+        <div class="field-group">
+          <div class="field-label">Tickers — type and press Enter or comma</div>
           <div class="ticker-row" id="tickerRow" onclick="document.getElementById('tickerField').focus()">
             <input id="tickerField" class="ticker-input-field" placeholder="e.g. NVDA, GLW, ANET…" autocomplete="off" autocapitalize="characters"/>
           </div>
-          <div style="font-size:10px;color:var(--hint);margin-top:4px">Pre-loaded with your current portfolio. Edit freely.</div>
         </div>
-        <div class="field-group" style="margin-bottom:16px">
-          <label>Optimization Mode</label>
+        <div class="field-group">
+          <div class="field-label">Optimization Mode</div>
           <div class="mode-tabs">
             <button class="mode-tab active" data-mode="sharpe" onclick="setMode(this)">Max Sharpe</button>
             <button class="mode-tab" data-mode="minvol" onclick="setMode(this)">Min Volatility</button>
@@ -206,17 +235,17 @@ nav{background:var(--ink);padding:0 40px;display:flex;align-items:center;justify
         </div>
       </div>
       <div>
-        <div class="field-group" style="margin-bottom:16px">
-          <label>Initial Capital ($)</label>
-          <input type="number" id="capital" value="10000" min="100" step="1000"/>
-        </div>
-        <div class="field-group" style="margin-bottom:16px">
-          <label>Biweekly Contribution ($)</label>
-          <input type="number" id="biweekly" value="500" min="0" step="50"/>
+        <div class="field-group">
+          <div class="field-label">Initial Capital ($)</div>
+          <input type="number" id="capital" class="field-input-styled" value="10000" min="100" step="1000"/>
         </div>
         <div class="field-group">
-          <label>Roth IRA Biweekly ($)</label>
-          <input type="number" id="rothBiweekly" value="358.33" step="0.01"/>
+          <div class="field-label">Biweekly Contribution ($)</div>
+          <input type="number" id="biweekly" class="field-input-styled" value="500" min="0" step="50"/>
+        </div>
+        <div class="field-group">
+          <div class="field-label">Roth IRA Biweekly ($)</div>
+          <input type="number" id="rothBiweekly" class="field-input-styled" value="358.33" step="0.01"/>
         </div>
       </div>
     </div>
@@ -228,109 +257,86 @@ nav{background:var(--ink);padding:0 40px;display:flex;align-items:center;justify
     </div>
   </div>
 
-  <!-- ── STATUS ── -->
   <div class="status-bar" id="statusBar">
     <div class="spinner" id="spinner"></div>
     <span id="statusMsg">Fetching live market data…</span>
   </div>
 
-  <!-- ── SMART PANEL ── -->
   <div class="smart-panel" id="smartPanel">
     <h3>Smart Portfolio Suggestions</h3>
-    <p>Based on your current sector concentration, here are complementary and diversifying additions.</p>
-    <div id="smartWarnings" class="warning-list"></div>
+    <p>Based on your sector concentration — complementary AI plays and uncorrelated blue-chip diversifiers.</p>
+    <div id="smartWarnings"></div>
     <div class="smart-cols">
-      <div>
-        <div class="smart-section-title">AI-Adjacent Complements — lower vol, infrastructure moat</div>
-        <div id="smartComplements"></div>
-      </div>
-      <div>
-        <div class="smart-section-title">Diversifiers — uncorrelated sectors, blue-chip defence</div>
-        <div id="smartDiversifiers"></div>
-      </div>
+      <div><div class="smart-section-title">AI-Adjacent Complements</div><div id="smartComplements"></div></div>
+      <div><div class="smart-section-title">Diversifiers — Blue-Chip Defence</div><div id="smartDiversifiers"></div></div>
     </div>
   </div>
 
-  <!-- ── RESULTS ── -->
   <div id="results">
 
-    <!-- KPI Strip -->
+    <div class="note-bar" id="dataNote"></div>
+
     <div class="kpi-strip" id="kpiStrip"></div>
 
-    <!-- Position table -->
+    <div class="section">
+      <div class="section-title">Portfolio Weights</div>
+      <div class="chart-card">
+        <div id="stackedBar" class="stacked-bar"></div>
+        <div id="stackedLegend" class="legend-row"></div>
+      </div>
+    </div>
+
     <div class="section">
       <div class="section-title">Position Breakdown</div>
       <div class="chart-card" style="padding:0;overflow:hidden">
-        <table class="pos-table" id="posTable">
+        <table class="pos-table">
           <thead><tr>
-            <th>Ticker</th><th>Sector</th><th>Weight</th>
-            <th>$ Amount</th><th>Exp. Return</th><th>Ann. Vol</th>
-            <th>Sharpe</th><th>Risk Contrib.</th><th>Allocation</th>
+            <th>Ticker</th><th>Sector</th><th>Weight</th><th>$ Amount</th>
+            <th>Exp. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Risk Contrib.</th>
           </tr></thead>
           <tbody id="posBody"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- Charts row 1: weights + sector pie + risk contrib -->
     <div class="section">
       <div class="section-title">Portfolio Composition</div>
-      <div class="charts-3">
-        <div class="chart-card">
-          <h3>Portfolio Weights</h3>
-          <div class="chart-wrap" style="height:240px"><canvas id="weightsChart" role="img" aria-label="Portfolio weights bar chart"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <h3>Sector Diversification</h3>
-          <div class="chart-wrap" style="height:240px"><canvas id="sectorChart" role="img" aria-label="Sector pie chart"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <h3>Risk Contribution</h3>
-          <div class="chart-wrap" style="height:240px"><canvas id="rcChart" role="img" aria-label="Risk contribution bar chart"></canvas></div>
-        </div>
+      <div class="charts-2">
+        <div class="chart-card"><h3>Sector Diversification</h3><div class="chart-wrap" style="height:240px"><canvas id="sectorChart"></canvas></div></div>
+        <div class="chart-card"><h3>Risk Contribution per Position</h3><div class="chart-wrap" style="height:240px"><canvas id="rcChart"></canvas></div></div>
       </div>
     </div>
 
-    <!-- Charts row 2: frontier + monte carlo -->
     <div class="section">
       <div class="section-title">Quantitative Risk Analysis</div>
       <div class="charts-2">
-        <div class="chart-card">
-          <h3>Efficient Frontier</h3>
-          <div class="chart-wrap" style="height:280px"><canvas id="frontierChart" role="img" aria-label="Efficient frontier scatter plot"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <h3>Monte Carlo — 3-Year Growth Paths (200 simulations)</h3>
-          <div class="chart-wrap" style="height:280px"><canvas id="mcChart" role="img" aria-label="Monte Carlo simulation paths"></canvas></div>
-        </div>
+        <div class="chart-card"><h3>Efficient Frontier</h3><div class="chart-wrap" style="height:280px"><canvas id="frontierChart"></canvas></div></div>
+        <div class="chart-card"><h3>Monte Carlo — 3-Year Growth Paths (200 simulations)</h3><div class="chart-wrap" style="height:280px"><canvas id="mcChart"></canvas></div></div>
       </div>
     </div>
 
-    <!-- Correlation matrix -->
     <div class="section">
       <div class="section-title">Correlation Matrix</div>
       <div class="chart-card">
         <div class="corr-wrap"><table class="corr-table" id="corrTable"></table></div>
-        <p style="font-size:10px;color:var(--hint);margin-top:12px">Dark blue = high positive correlation (risk cluster). Light = low/negative correlation (diversification benefit). Computed from 1-year daily returns.</p>
+        <p style="font-size:10px;color:var(--text-faint);margin-top:12px;font-weight:500">Dark purple = high positive correlation (risk cluster). Light = low correlation (diversification benefit). Computed from 1-year daily returns.</p>
       </div>
     </div>
 
-    <!-- 3-Year Scenarios -->
     <div class="section">
       <div class="section-title">3-Year Scenario Analysis — Initial Capital + Biweekly Contributions</div>
       <div class="scenario-grid" id="scenarioGrid"></div>
     </div>
 
-    <!-- Scenario detail table -->
     <div class="section">
       <div class="section-title">Scenario Detail by Position</div>
       <div id="scenarioTables"></div>
     </div>
 
-  </div><!-- /results -->
+  </div>
 
-  <p class="disclaimer">Not financial advice. For educational and analytical purposes only. Data sourced from Yahoo Finance via yfinance — may be delayed. All return and volatility estimates are backward-looking historical figures; past performance does not guarantee future results. Consult a licensed financial advisor before making investment decisions.</p>
-</div><!-- /main -->
+  <p class="disclaimer">Not financial advice. For educational and analytical purposes only. Data sourced from Alpaca Markets — may be delayed or simulated. All return and volatility estimates are backward-looking; past performance does not guarantee future results. Consult a licensed financial advisor before making investment decisions.</p>
+</div>
 
 <script src="/static/js/app.js"></script>
 </body>
