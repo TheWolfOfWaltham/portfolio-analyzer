@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio Analyzer — AI Infrastructure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#1a1a18;--muted:#5a5a56;--hint:#999890;
+  --surface:#f4f3ef;--card:#ffffff;--page:#faf9f6;
+  --rule:rgba(0,0,0,0.10);--rule2:rgba(0,0,0,0.20);
+  --green:#1a6641;--green-bg:#e6f4ed;--green-border:rgba(26,102,65,0.25);
+  --red:#a32d2d;--red-bg:#fdf0f0;
+  --amber:#7a4d0a;--amber-bg:#fef5e6;
+  --blue:#185fa5;--blue-bg:#e8f2fc;--blue-border:rgba(24,95,165,0.25);
+  --accent:#1565c0;
+}
+html{background:var(--page);min-height:100vh}
+body{font-family:'Instrument Sans',sans-serif;font-size:13px;color:var(--ink);line-height:1.5;padding:0 0 80px}
+
+/* ── NAV ── */
+nav{background:var(--ink);padding:0 40px;display:flex;align-items:center;justify-content:space-between;height:52px;position:sticky;top:0;z-index:100}
+.nav-brand{font-family:'DM Mono',monospace;font-size:13px;color:#fff;letter-spacing:.04em}
+.nav-sub{font-size:11px;color:#9e9c96;margin-left:14px}
+.nav-right{font-size:11px;color:#9e9c96}
+
+/* ── HERO ── */
+.hero{background:var(--ink);color:#fff;padding:52px 40px 44px;border-bottom:3px solid #e0ddd8}
+.hero-eyebrow{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.12em;color:#9e9c96;text-transform:uppercase;margin-bottom:12px}
+.hero h1{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1.15;margin-bottom:10px}
+.hero h1 em{font-style:italic;color:#b8c5d8}
+.hero-sub{font-size:13px;color:#9e9c96;max-width:580px}
+
+/* ── MAIN LAYOUT ── */
+.main{max-width:1200px;margin:0 auto;padding:40px 40px 0}
+
+/* ── INPUT CARD ── */
+.input-card{background:var(--card);border:0.5px solid var(--rule2);border-radius:8px;padding:32px 36px;margin-bottom:28px;box-shadow:0 2px 12px rgba(0,0,0,.05)}
+.input-card h2{font-family:'DM Serif Display',serif;font-size:20px;font-weight:400;margin-bottom:20px;border-bottom:0.5px solid var(--rule2);padding-bottom:12px}
+.input-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.field-group{display:flex;flex-direction:column;gap:6px}
+.field-group label{font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.field-group input,.field-group select{padding:9px 12px;border:1px solid #d0cfc9;border-radius:5px;font-family:'Instrument Sans',sans-serif;font-size:13px;color:var(--ink);background:#fff;width:100%;outline:none;transition:border-color .15s}
+.field-group input:focus,.field-group select:focus{border-color:var(--accent)}
+
+.ticker-row{display:flex;flex-wrap:wrap;gap:6px;min-height:36px;padding:8px;border:1px solid #d0cfc9;border-radius:5px;background:#fff;cursor:text}
+.ticker-chip{display:inline-flex;align-items:center;gap:4px;background:var(--ink);color:#fff;border-radius:4px;padding:3px 10px;font-family:'DM Mono',monospace;font-size:11px;font-weight:500}
+.ticker-chip button{background:none;border:none;color:#aaa;cursor:pointer;font-size:12px;line-height:1;padding:0 0 0 2px}
+.ticker-chip button:hover{color:#fff}
+.ticker-input-field{border:none;outline:none;font-family:'DM Mono',monospace;font-size:12px;min-width:80px;flex:1;padding:2px 4px}
+
+.btn-row{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+.btn{padding:10px 22px;border-radius:5px;font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;border:1px solid transparent}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-primary:hover{background:#2c2c28}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-outline{background:#fff;color:var(--ink);border-color:#c0bfb8}
+.btn-outline:hover{background:var(--surface)}
+.btn-smart{background:var(--blue-bg);color:var(--blue);border-color:var(--blue-border)}
+.btn-smart:hover{background:#d4e8f8}
+
+.mode-tabs{display:flex;gap:0;border:1px solid #d0cfc9;border-radius:5px;overflow:hidden;width:fit-content}
+.mode-tab{padding:8px 16px;font-size:12px;font-weight:500;cursor:pointer;background:#fff;color:var(--muted);border:none;transition:all .15s}
+.mode-tab.active{background:var(--ink);color:#fff}
+
+/* ── STATUS ── */
+.status-bar{background:var(--amber-bg);border:1px solid rgba(122,77,10,.2);border-radius:6px;padding:12px 16px;font-size:13px;color:var(--amber);margin-bottom:24px;display:none}
+.status-bar.visible{display:flex;align-items:center;gap:10px}
+.spinner{width:16px;height:16px;border:2px solid rgba(122,77,10,.3);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-err{background:var(--red-bg);border-color:rgba(163,45,45,.2);color:var(--red)}
+
+/* ── KPI STRIP ── */
+.kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:28px}
+.kpi{background:var(--card);border:0.5px solid var(--rule2);border-radius:7px;padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.kpi-label{font-size:10px;font-weight:500;color:var(--hint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+.kpi-val{font-family:'DM Serif Display',serif;font-size:24px;font-weight:400;line-height:1}
+.kpi-sub{font-size:10px;color:var(--muted);margin-top:3px}
+.kpi-green .kpi-val{color:var(--green)}
+.kpi-red .kpi-val{color:var(--red)}
+.kpi-blue .kpi-val{color:var(--blue)}
+
+/* ── SECTION ── */
+.section{margin-bottom:32px}
+.section-title{font-family:'DM Serif Display',serif;font-size:18px;font-weight:400;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.section-title::after{content:'';flex:1;height:0.5px;background:var(--rule2)}
+
+/* ── CHARTS GRID ── */
+.charts-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
+.charts-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:28px}
+.chart-card{background:var(--card);border:0.5px solid var(--rule2);border-radius:8px;padding:24px;box-shadow:0 1px 6px rgba(0,0,0,.04)}
+.chart-card h3{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px}
+.chart-wrap{position:relative}
+
+/* ── POSITION TABLE ── */
+.pos-table{width:100%;border-collapse:collapse;font-size:12px}
+.pos-table th{text-align:left;padding:8px 10px;font-size:10px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--rule2)}
+.pos-table td{padding:9px 10px;border-bottom:0.5px solid var(--rule)}
+.pos-table tr:last-child td{border-bottom:none}
+.pos-table tr:hover td{background:var(--surface)}
+.ticker-cell{font-family:'DM Mono',monospace;font-weight:500;font-size:12px}
+.bar-cell{display:flex;align-items:center;gap:8px}
+.bar-bg{flex:1;height:5px;background:#eeecea;border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px}
+.tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:3px;font-weight:500}
+.tag-high{background:#fef3e0;color:#7a4d0a}
+.tag-med{background:var(--blue-bg);color:var(--blue)}
+.tag-low{background:var(--green-bg);color:var(--green)}
+
+/* ── SCENARIOS ── */
+.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
+.scenario-card{border-radius:8px;padding:24px;border:1px solid rgba(0,0,0,.08)}
+.sc-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;opacity:.7}
+.sc-total{font-family:'DM Serif Display',serif;font-size:32px;margin-bottom:4px}
+.sc-sub{font-size:11px;opacity:.65;margin-bottom:16px}
+.sc-row{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:0.5px solid rgba(0,0,0,.07)}
+.sc-row:last-child{border-bottom:none}
+.sc-ticker{font-family:'DM Mono',monospace;font-weight:500}
+.sc-breakdown{margin-top:12px;background:rgba(0,0,0,.04);border-radius:5px;padding:10px 12px}
+.sc-breakdown-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;opacity:.6}
+
+/* ── CORR MATRIX ── */
+.corr-wrap{overflow-x:auto}
+.corr-table{border-collapse:collapse;font-size:11px}
+.corr-table td,.corr-table th{width:52px;height:30px;text-align:center;border:none;font-size:10px}
+.corr-table th{color:var(--muted);font-family:'DM Mono',monospace;font-weight:500}
+.corr-table .row-lbl{color:var(--muted);font-family:'DM Mono',monospace;font-weight:500;text-align:right;padding-right:6px;width:54px}
+
+/* ── SMART PANEL ── */
+.smart-panel{background:var(--card);border:0.5px solid var(--blue-border);border-radius:8px;padding:28px;margin-bottom:28px;box-shadow:0 1px 6px rgba(24,95,165,.06);display:none}
+.smart-panel.visible{display:block}
+.smart-panel h3{font-family:'DM Serif Display',serif;font-size:18px;margin-bottom:6px}
+.smart-panel p{font-size:12px;color:var(--muted);margin-bottom:20px}
+.smart-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.smart-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}
+.smart-card{background:var(--surface);border-radius:6px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.smart-card-left .sc-ticker{font-size:13px;margin-bottom:2px}
+.smart-desc{font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:4px}
+.smart-rationale{font-size:10px;color:var(--blue);font-style:italic}
+.smart-stats{text-align:right;flex-shrink:0}
+.smart-ret{font-size:13px;font-weight:600;color:var(--green)}
+.smart-vol{font-size:10px;color:var(--muted)}
+.btn-add-ticker{background:var(--ink);color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:10px;cursor:pointer;margin-top:6px;font-family:'Instrument Sans',sans-serif}
+.warning-list{margin-bottom:16px}
+.warning-item{background:var(--amber-bg);border:1px solid rgba(122,77,10,.15);border-radius:5px;padding:10px 14px;font-size:12px;color:var(--amber);margin-bottom:6px;display:flex;gap:8px}
+.warning-item::before{content:'⚠';flex-shrink:0}
+
+/* ── RESULTS (hidden initially) ── */
+#results{display:none}
+#results.visible{display:block}
+
+/* ── FOOTER ── */
+.disclaimer{font-size:10px;color:var(--hint);text-align:center;padding:24px 40px;border-top:0.5px solid var(--rule2);max-width:1200px;margin:40px auto 0;line-height:1.6}
+
+@media(max-width:900px){
+  .kpi-strip{grid-template-columns:repeat(3,1fr)}
+  .charts-2,.charts-3,.scenario-grid,.smart-cols{grid-template-columns:1fr}
+  .input-grid{grid-template-columns:1fr}
+  .main{padding:24px 20px 0}
+  .hero{padding:36px 20px 30px}
+  nav{padding:0 20px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div style="display:flex;align-items:center">
+    <span class="nav-brand">PORTFOLIO ANALYZER</span>
+    <span class="nav-sub">/ AI Infrastructure · Quantitative Risk Tools</span>
+  </div>
+  <span class="nav-right">Data via Yahoo Finance · Built with Flask + Python</span>
+</nav>
+
+<div class="hero">
+  <div class="hero-eyebrow">Quantitative Portfolio Analysis</div>
+  <h1>Build smarter.<br><em>Invest with conviction.</em></h1>
+  <p class="hero-sub">Enter your tickers and capital. Get real Sharpe ratios, Monte Carlo simulations, efficient frontiers, correlation matrices, and 3-year scenario analysis — all computed live from market data.</p>
+</div>
+
+<div class="main">
+
+  <!-- ── INPUT CARD ── -->
+  <div class="input-card">
+    <h2>Portfolio Setup</h2>
+    <div class="input-grid">
+      <div>
+        <div class="field-group" style="margin-bottom:16px">
+          <label>Tickers — type and press Enter or comma</label>
+          <div class="ticker-row" id="tickerRow" onclick="document.getElementById('tickerField').focus()">
+            <input id="tickerField" class="ticker-input-field" placeholder="e.g. NVDA, GLW, ANET…" autocomplete="off" autocapitalize="characters"/>
+          </div>
+          <div style="font-size:10px;color:var(--hint);margin-top:4px">Pre-loaded with your current portfolio. Edit freely.</div>
+        </div>
+        <div class="field-group" style="margin-bottom:16px">
+          <label>Optimization Mode</label>
+          <div class="mode-tabs">
+            <button class="mode-tab active" data-mode="sharpe" onclick="setMode(this)">Max Sharpe</button>
+            <button class="mode-tab" data-mode="minvol" onclick="setMode(this)">Min Volatility</button>
+            <button class="mode-tab" data-mode="riskparity" onclick="setMode(this)">Risk Parity</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="field-group" style="margin-bottom:16px">
+          <label>Initial Capital ($)</label>
+          <input type="number" id="capital" value="10000" min="100" step="1000"/>
+        </div>
+        <div class="field-group" style="margin-bottom:16px">
+          <label>Biweekly Contribution ($)</label>
+          <input type="number" id="biweekly" value="500" min="0" step="50"/>
+        </div>
+        <div class="field-group">
+          <label>Roth IRA Biweekly ($)</label>
+          <input type="number" id="rothBiweekly" value="358.33" step="0.01"/>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="analyzeBtn" onclick="runAnalysis()">Analyze Portfolio</button>
+      <button class="btn btn-smart" id="smartBtn" onclick="runSmart()">✦ Smart Suggestions</button>
+      <button class="btn btn-outline" onclick="loadDefault()">Load My Portfolio</button>
+      <button class="btn btn-outline" onclick="clearAll()">Clear</button>
+    </div>
+  </div>
+
+  <!-- ── STATUS ── -->
+  <div class="status-bar" id="statusBar">
+    <div class="spinner" id="spinner"></div>
+    <span id="statusMsg">Fetching live market data…</span>
+  </div>
+
+  <!-- ── SMART PANEL ── -->
+  <div class="smart-panel" id="smartPanel">
+    <h3>Smart Portfolio Suggestions</h3>
+    <p>Based on your current sector concentration, here are complementary and diversifying additions.</p>
+    <div id="smartWarnings" class="warning-list"></div>
+    <div class="smart-cols">
+      <div>
+        <div class="smart-section-title">AI-Adjacent Complements — lower vol, infrastructure moat</div>
+        <div id="smartComplements"></div>
+      </div>
+      <div>
+        <div class="smart-section-title">Diversifiers — uncorrelated sectors, blue-chip defence</div>
+        <div id="smartDiversifiers"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RESULTS ── -->
+  <div id="results">
+
+    <!-- KPI Strip -->
+    <div class="kpi-strip" id="kpiStrip"></div>
+
+    <!-- Position table -->
+    <div class="section">
+      <div class="section-title">Position Breakdown</div>
+      <div class="chart-card" style="padding:0;overflow:hidden">
+        <table class="pos-table" id="posTable">
+          <thead><tr>
+            <th>Ticker</th><th>Sector</th><th>Weight</th>
+            <th>$ Amount</th><th>Exp. Return</th><th>Ann. Vol</th>
+            <th>Sharpe</th><th>Risk Contrib.</th><th>Allocation</th>
+          </tr></thead>
+          <tbody id="posBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Charts row 1: weights + sector pie + risk contrib -->
+    <div class="section">
+      <div class="section-title">Portfolio Composition</div>
+      <div class="charts-3">
+        <div class="chart-card">
+          <h3>Portfolio Weights</h3>
+          <div class="chart-wrap" style="height:240px"><canvas id="weightsChart" role="img" aria-label="Portfolio weights bar chart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Sector Diversification</h3>
+          <div class="chart-wrap" style="height:240px"><canvas id="sectorChart" role="img" aria-label="Sector pie chart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Risk Contribution</h3>
+          <div class="chart-wrap" style="height:240px"><canvas id="rcChart" role="img" aria-label="Risk contribution bar chart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts row 2: frontier + monte carlo -->
+    <div class="section">
+      <div class="section-title">Quantitative Risk Analysis</div>
+      <div class="charts-2">
+        <div class="chart-card">
+          <h3>Efficient Frontier</h3>
+          <div class="chart-wrap" style="height:280px"><canvas id="frontierChart" role="img" aria-label="Efficient frontier scatter plot"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Monte Carlo — 3-Year Growth Paths (200 simulations)</h3>
+          <div class="chart-wrap" style="height:280px"><canvas id="mcChart" role="img" aria-label="Monte Carlo simulation paths"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Correlation matrix -->
+    <div class="section">
+      <div class="section-title">Correlation Matrix</div>
+      <div class="chart-card">
+        <div class="corr-wrap"><table class="corr-table" id="corrTable"></table></div>
+        <p style="font-size:10px;color:var(--hint);margin-top:12px">Dark blue = high positive correlation (risk cluster). Light = low/negative correlation (diversification benefit). Computed from 1-year daily returns.</p>
+      </div>
+    </div>
+
+    <!-- 3-Year Scenarios -->
+    <div class="section">
+      <div class="section-title">3-Year Scenario Analysis — Initial Capital + Biweekly Contributions</div>
+      <div class="scenario-grid" id="scenarioGrid"></div>
+    </div>
+
+    <!-- Scenario detail table -->
+    <div class="section">
+      <div class="section-title">Scenario Detail by Position</div>
+      <div id="scenarioTables"></div>
+    </div>
+
+  </div><!-- /results -->
+
+  <p class="disclaimer">Not financial advice. For educational and analytical purposes only. Data sourced from Yahoo Finance via yfinance — may be delayed. All return and volatility estimates are backward-looking historical figures; past performance does not guarantee future results. Consult a licensed financial advisor before making investment decisions.</p>
+</div><!-- /main -->
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
