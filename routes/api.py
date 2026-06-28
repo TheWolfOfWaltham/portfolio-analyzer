@@ -18,14 +18,29 @@ SECTOR_MAP = {
     'CRWD':'Cybersecurity','NEE':'Utilities','LITE':'AI Infra Optical','ETR':'Utility',
 }
 SECTOR_COLORS = {
-    'Semiconductors':'#e65100','AI Cloud Infra':'#22c55e','AI Infra Optical':'#6b3aff',
-    'Power Infra':'#f43f5e','Custom ASIC':'#c084ff','Optical Transceivers':'#2dd4bf',
-    'AI Networking':'#60a5fa','Power Generation':'#a3e635','Enterprise SaaS':'#94a3b8',
-    'Nuclear Power':'#f59e0b','Financials':'#facc15','Consumer Staples':'#4ade80',
-    'Healthcare':'#fb7185','Conglomerate':'#86efac','Fintech':'#fb923c',
-    'Cybersecurity':'#818cf8','Utilities':'#34d399','Utility':'#bef264','Other':'#5a5270',
+    # Group 1 — AI Optical — near-black navy
+    'AI Infra Optical':'#111827', 'Optical Transceivers':'#0f1a2e',
+    # Group 2 — AI Compute — dark charcoal
+    'Semiconductors':'#1a1a1a', 'AI Cloud Infra':'#1c1c22',
+    # Group 3 — ASIC/Networking — vantablack violet
+    'Custom ASIC':'#160d38', 'AI Networking':'#130b30',
+    # Group 4 — Power — near-black crimson
+    'Power Infra':'#200808', 'Power Generation':'#240a0a', 'Nuclear Power':'#1a0606',
+    # Group 5 — SaaS/Fintech — near-black amber
+    'Enterprise SaaS':'#1e1205', 'Fintech':'#1a1005', 'Cybersecurity':'#151020',
+    # Group 6 — Defensive — near-black forest
+    'Consumer Staples':'#0a1a0e', 'Financials':'#0a100e',
+    'Healthcare':'#0c120f', 'Conglomerate':'#101010',
+    'Utilities':'#0d150d', 'Utility':'#141414', 'Other':'#131313',
 }
-# Macro bucket mapping
+MACRO_COLORS = {
+    'AI Compute':       '#1a1a1a',
+    'AI Infrastructure':'#111827',
+    'Power & Energy':   '#200808',
+    'Growth/SaaS':      '#1e1205',
+    'Defensive':        '#0a1a0e',
+    'Other':            '#160d38',
+}
 MACRO_BUCKET = {
     'Semiconductors':'AI Compute','AI Cloud Infra':'AI Compute',
     'AI Infra Optical':'AI Infrastructure','Optical Transceivers':'AI Infrastructure',
@@ -34,10 +49,6 @@ MACRO_BUCKET = {
     'Enterprise SaaS':'Growth/SaaS','Fintech':'Growth/SaaS','Cybersecurity':'Growth/SaaS',
     'Consumer Staples':'Defensive','Healthcare':'Defensive','Conglomerate':'Defensive',
     'Financials':'Defensive','Utilities':'Defensive','Utility':'Defensive','Other':'Other',
-}
-MACRO_COLORS = {
-    'AI Compute':'#9b6dff','AI Infrastructure':'#2dd4bf',
-    'Power & Energy':'#f43f5e','Growth/SaaS':'#fbbf24','Defensive':'#4ade80','Other':'#5a5270',
 }
 
 def _sectors(tickers):
