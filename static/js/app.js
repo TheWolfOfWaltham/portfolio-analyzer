@@ -38,7 +38,34 @@ const SUB_TO_MACRO = {
   'Financials':'Defensive','Utilities':'Defensive','Utility':'Defensive','Other':'Other',
 };
 
-const DEFAULT_TICKERS = ['GLW','SNDK','NBIS','GEV','MRVL','COHR','ANET','VST','NOW'];
+// Glow colors — lighter/more vibrant than fill colors for visible glow effect
+const GLOW_COLORS = {
+  // AI Optical — teal glow
+  'GLW':'rgba(20,140,170,0.7)', 'COHR':'rgba(15,110,140,0.7)', 'LITE':'rgba(10,100,130,0.7)',
+  // AI Compute — slate-blue glow
+  'SNDK':'rgba(70,80,100,0.6)', 'NBIS':'rgba(50,80,140,0.65)', 'MU':'rgba(60,90,130,0.6)',
+  // ASIC/Networking — violet glow
+  'MRVL':'rgba(110,55,230,0.7)', 'ANET':'rgba(80,65,220,0.7)', 'AVGO':'rgba(70,55,200,0.65)',
+  // Power & Energy — crimson glow
+  'GEV':'rgba(220,35,35,0.7)', 'VST':'rgba(200,25,55,0.7)', 'CEG':'rgba(180,20,20,0.65)',
+  // SaaS/Enterprise — amber-brown glow
+  'NOW':'rgba(100,55,20,0.65)', 'SOFI':'rgba(120,65,20,0.6)', 'CRWD':'rgba(70,55,190,0.65)',
+  // Defensive — forest glow
+  'WMT':'rgba(20,100,40,0.6)', 'JPM':'rgba(100,70,15,0.6)', 'JNJ':'rgba(15,80,120,0.6)',
+  'BRK/B':'rgba(40,40,40,0.5)', 'PG':'rgba(20,90,30,0.55)',
+  'NEE':'rgba(20,80,35,0.55)', 'ETR':'rgba(50,50,55,0.5)',
+};
+// Macro sector glow colors
+const MACRO_GLOW = {
+  'AI Compute':       'rgba(70,80,110,0.65)',
+  'AI Infrastructure':'rgba(20,130,165,0.65)',
+  'Power & Energy':   'rgba(215,35,35,0.65)',
+  'Growth/SaaS':      'rgba(100,55,20,0.6)',
+  'Defensive':        'rgba(20,95,35,0.6)',
+  'Other':            'rgba(90,50,200,0.55)',
+};
+function glowFor(ticker){ return GLOW_COLORS[ticker]||'rgba(107,58,255,0.55)'; }
+function macroGlowFor(key){ return MACRO_GLOW[key]||'rgba(107,58,255,0.55)'; }
 let tickers = [], currentMode = 'sharpe', chartInstances = {};
 let sortCol = 'weight', sortDir = 'desc', lastPositionData = null;
 let scenarioSortState = {};
@@ -114,10 +141,10 @@ function renderChips(){
   const row=document.getElementById('tickerRow');
   row.querySelectorAll('.ticker-chip').forEach(c=>c.remove());
   tickers.forEach((t,i)=>{
-    const col=tickerColor(t,i);
+    const glow=glowFor(t);
     const chip=document.createElement('span');
     chip.className='ticker-chip';
-    chip.style.cssText='background:'+col+'33;color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.22);box-shadow:0 0 0 0.5px rgba(255,255,255,0.06)';
+    chip.style.cssText='background:#000;color:rgba(255,255,255,0.9);box-shadow:0 0 14px 3px '+glow+',0 0 28px 6px '+glow.replace(/[\d.]+\)$/,'0.25)')+'';
     chip.innerHTML=t+'<button onclick="removeTicker('+i+')">✕</button>';
     row.insertBefore(chip,document.getElementById('tickerField'));
   });
@@ -149,17 +176,22 @@ function clearAll(){ tickers=[]; renderChips(); }
 function updateRothDisplay(){
   const contribVal = +document.getElementById('biweekly').value || 0;
   const rothVal    = +document.getElementById('rothBiweekly').value || 0;
-  const freq = FREQ[currentFreq];
-  const annualTotal = freq.toAnnual(contribVal);
-  const rothAnnual  = freq.toAnnual(rothVal);
-  const roth3yr     = rothAnnual * 3;
-  const limit2026   = 7000;
-  const overLimit   = rothAnnual > limit2026;
+  const over50     = document.getElementById('over50Toggle')?.checked || false;
+  const freq       = FREQ[currentFreq];
+  const annualTotal  = freq.toAnnual(contribVal);
+  const rothAnnual   = freq.toAnnual(rothVal);
+  const roth3yr      = rothAnnual * 3;
+  const limit        = over50 ? 8000 : 7000;
+  const maxPerPeriod = limit / freq.periods;
+  const overLimit    = rothAnnual > limit;
+  const remaining    = Math.max(0, limit - rothAnnual);
   document.getElementById('rothDisplay').innerHTML =
-    '<div class="roth-row"><span>Annual ' + freq.label + ' (total)</span><span>$' + annualTotal.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>' +
-    '<div class="roth-row"><span>Roth annual contribution</span><span' + (overLimit?' style="color:var(--amber)"':' style="color:var(--green)"') + '>$' + rothAnnual.toLocaleString(undefined,{maximumFractionDigits:2}) + (overLimit?' ⚠':'') + '</span></div>' +
-    (overLimit?'<div class="roth-warn">Exceeds 2026 IRA limit of $7,000 — consult a tax advisor</div>':'')+
-    '<div class="roth-row"><span>Roth 3yr total deposits</span><span>$' + roth3yr.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>';
+    '<div class="roth-row"><span>Annual ' + freq.label + ' total</span><span>$' + annualTotal.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>' +
+    '<div class="roth-row"><span>Roth annual contribution</span><span style="color:' + (overLimit?'var(--red)':'var(--green)') + '">$' + rothAnnual.toLocaleString(undefined,{maximumFractionDigits:2}) + (overLimit?' ⚠ over limit':'') + '</span></div>' +
+    '<div class="roth-row"><span>2026 IRA limit (' + (over50?'50+':'under 50') + ')</span><span>$' + limit.toLocaleString() + '/yr</span></div>' +
+    '<div class="roth-row"><span>Max ' + freq.label.toLowerCase() + ' to hit limit</span><span style="color:var(--purple-mid)">$' + maxPerPeriod.toFixed(2) + '</span></div>' +
+    (remaining > 0 ? '<div class="roth-row"><span>Remaining annual allowance</span><span style="color:var(--green)">$' + remaining.toFixed(2) + '</span></div>' : '') +
+    '<div class="roth-row"><span>3yr total Roth deposits</span><span>$' + roth3yr.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>';
 }
 document.getElementById('biweekly').addEventListener('input', updateRothDisplay);
 document.getElementById('rothBiweekly').addEventListener('input', updateRothDisplay);
@@ -201,9 +233,72 @@ function destroyChart(id){ if(chartInstances[id]){ chartInstances[id].destroy();
 function renderAll(d){
   document.getElementById('dataNote').textContent=d.data_note||'';
   lastPositionData=d;
-  renderKPIs(d); renderStackedBar(d); renderExposure(d);
+  renderKPIs(d); renderRiskPanel(d); renderStackedBar(d); renderExposure(d);
   renderFrontier(d); renderMonteCarlo(d);
   renderScenarios(d); renderPositionTable(d); renderScenarioTables(d);
+}
+
+function renderRiskPanel(d, extraRisks){
+  const p=d.portfolio;
+  const exp=d.exposure||{};
+  const macro=exp.macro||{};
+  const aiPct=(macro['AI Infrastructure']||0)+(macro['AI Compute']||0);
+  const risks=[];
+
+  // Dynamic risks based on actual portfolio metrics
+  if(p.max_dd_est<-60){
+    risks.push({
+      header:'Drawdown Risk: Extreme downside exposure',
+      body:'Estimated max drawdown of '+p.max_dd_est+'% under a 2.5σ stress scenario. Consider adding low-beta defensive positions (WMT, JNJ, BRK/B) to reduce tail risk.'
+    });
+  } else if(p.max_dd_est<-40){
+    risks.push({
+      header:'Drawdown Risk: High downside in stress scenarios',
+      body:'Estimated max drawdown of '+p.max_dd_est+'%. Adding 10-15% in low-vol blue-chips could reduce this materially without sacrificing core AI upside.'
+    });
+  }
+  if(aiPct>65){
+    risks.push({
+      header:'Concentration Risk: '+aiPct.toFixed(0)+'% AI sector exposure',
+      body:'A single AI capex pause or macro risk-off event would hit the majority of this portfolio simultaneously. Consider adding uncorrelated sectors — energy, healthcare, or consumer staples.'
+    });
+  } else if(aiPct>50){
+    risks.push({
+      header:'Concentration Risk: Elevated AI exposure at '+aiPct.toFixed(0)+'%',
+      body:'More than half the portfolio is correlated to AI infrastructure capex. A 2027-style slowdown scenario could impact most positions at once.'
+    });
+  }
+  if(p.ann_vol>60){
+    risks.push({
+      header:'Volatility Risk: Portfolio vol of '+p.ann_vol+'% is very high',
+      body:'Annualized volatility of '+p.ann_vol+'% means the portfolio can swing ±'+Math.round(p.ann_vol/Math.sqrt(12))+'% in a typical month. DCA strategy helps — but consider a vol-reducing hedge position.'
+    });
+  } else if(p.ann_vol>40){
+    risks.push({
+      header:'Volatility Risk: '+p.ann_vol+'% annualized vol',
+      body:'Moderate-to-high volatility. Systematic profit-taking rules on high-conviction positions like SNDK help manage this behaviorally.'
+    });
+  }
+
+  // Merge any extra risks from Claude smart suggestions
+  if(extraRisks&&extraRisks.length){
+    extraRisks.forEach(r=>{
+      if(risks.length<4) risks.push({header:r.split(':')[0]||'Risk', body:r});
+    });
+  }
+
+  const panel=document.getElementById('riskPanel');
+  if(!risks.length){ panel.style.display='none'; return; }
+  panel.style.display='block';
+  panel.innerHTML='<div class="risk-panel">'+
+    '<div class="risk-panel-title">Portfolio Risk Assessment</div>'+
+    risks.slice(0,3).map(r=>
+      '<div class="risk-item">'+
+        '<div class="risk-item-header">'+r.header+'</div>'+
+        '<div class="risk-item-body">'+r.body+'</div>'+
+      '</div>'
+    ).join('')+
+  '</div>';
 }
 
 // ── KPIs ──────────────────────────────────────────────────────────────────────
@@ -231,17 +326,18 @@ function renderKPIs(d){
 function renderStackedBar(d){
   const bar=document.getElementById('stackedBar'), leg=document.getElementById('stackedLegend');
   bar.innerHTML=''; leg.innerHTML='';
-  // Sort by weight descending — left = most weighted
   const sorted=[...d.positions].sort((a,b)=>b.weight-a.weight);
   sorted.forEach((p,i)=>{
     const col=tickerColor(p.ticker,i);
+    const glow=glowFor(p.ticker);
+    const glowOuter=glow.replace(/[\d.]+\)$/,'0.25)');
     const seg=document.createElement('div');
     seg.className='seg'+(p.weight<8?' seg-sm':'');
-    seg.style.cssText='width:'+p.weight+'%;background:'+col;
+    seg.style.cssText='width:'+p.weight+'%;background:#000;border:1.5px solid '+col+';box-shadow:0 0 14px 3px '+glow+',inset 0 0 10px '+glow.replace(/[\d.]+\)$/,'0.12)')+',0 0 28px 6px '+glowOuter;
     seg.innerHTML='<span class="seg-pct">'+p.weight+'%</span><span class="seg-ticker">'+p.ticker+'</span>';
     bar.appendChild(seg);
     const li=document.createElement('div'); li.className='legend-item';
-    li.innerHTML='<div class="legend-dot" style="background:'+col+'"></div>'+p.ticker+' '+p.weight+'%';
+    li.innerHTML='<div class="legend-dot" style="background:'+col+';box-shadow:0 0 6px 1px '+glow+'"></div>'+p.ticker+' '+p.weight+'%';
     leg.appendChild(li);
   });
 }
@@ -249,21 +345,19 @@ function renderStackedBar(d){
 // ── Sector exposure ───────────────────────────────────────────────────────────
 function renderExposure(d){
   if(!d.exposure){ document.getElementById('exposureCard').innerHTML=''; return; }
-  const exp=d.exposure;
-  const macro=exp.macro;
-
-  // Sort macro by weight descending — left = most weighted
+  const macro=d.exposure.macro;
   const sorted=Object.entries(macro).sort((a,b)=>b[1]-a[1]);
-
-  let macroHTML='<div class="exposure-macro-bar">';
+  let html='<div class="exposure-macro-bar">';
   sorted.forEach(([label,pct])=>{
-    const col=MACRO_COLORS[label]||'#1e1b4b';
-    macroHTML+='<div class="exp-seg" style="width:'+pct+'%;background:'+col+'">'+
+    const baseCol=MACRO_COLORS[label]||'#1e1b4b';
+    const glow=macroGlowFor(label);
+    const glowOuter=glow.replace(/[\d.]+\)$/,'0.2)');
+    html+='<div class="exp-seg" style="width:'+pct+'%;background:#000;border:1.5px solid '+baseCol+';box-shadow:0 0 14px 3px '+glow+',inset 0 0 10px '+glow.replace(/[\d.]+\)$/,'0.1)')+',0 0 26px 5px '+glowOuter+'">'+
       '<span class="exp-seg-label">'+label+'</span>'+
       '<span class="exp-seg-pct">'+pct+'%</span></div>';
   });
-  macroHTML+='</div>';
-  document.getElementById('exposureCard').innerHTML=macroHTML;
+  html+='</div>';
+  document.getElementById('exposureCard').innerHTML=html;
 }
 
 // ── Frontier ──────────────────────────────────────────────────────────────────
@@ -296,27 +390,35 @@ function renderMonteCarlo(d){
   const p50=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.50)));
   const p95=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.95)));
   const pDs=paths.slice(0,200).map(p=>({data:p,borderColor:'rgba(155,109,255,0.10)',borderWidth:0.8,pointRadius:0,fill:false,tension:.3}));
+  const namedDatasets = [
+    {label:'95th pct', color:'rgba(107,58,255,0.9)'},
+    {label:'Median',   color:'#c084ff'},
+    {label:'5th pct',  color:'rgba(159,18,57,0.9)'},
+  ];
   const mcEndLabels = {
     id:'mcEndLabels',
     afterDraw(chart){
       const ctx=chart.ctx;
-      const ds=chart.data.datasets;
-      const named=ds.slice(-3); // 95th, Median, 5th
-      named.forEach((d,i)=>{
-        const idx=ds.length-3+i;
+      const allDs=chart.data.datasets;
+      // Named datasets are the last 3
+      const startIdx=allDs.length-3;
+      namedDatasets.forEach((nd,i)=>{
+        const idx=startIdx+i;
+        if(idx<0||idx>=allDs.length) return;
         const meta=chart.getDatasetMeta(idx);
-        if(!meta.visible||!meta.data.length) return;
-        const last=meta.data[meta.data.length-1];
-        const val=d.data[d.data.length-1];
-        if(!val) return;
-        const col=typeof d.borderColor==='string'?d.borderColor:'#9b6dff';
+        if(!meta||!meta.data||!meta.data.length) return;
+        const lastPt=meta.data[meta.data.length-1];
+        if(!lastPt) return;
+        const val=allDs[idx].data[allDs[idx].data.length-1];
+        if(!val&&val!==0) return;
+        const x=lastPt.x, y=lastPt.y;
+        if(isNaN(x)||isNaN(y)) return;
         ctx.save();
-        ctx.font='700 10px "Space Grotesk",sans-serif';
-        ctx.fillStyle=col;
+        ctx.fillStyle=nd.color;
+        ctx.font='700 10px Space Grotesk, sans-serif';
         ctx.textAlign='left';
-        ctx.shadowColor=col;
-        ctx.shadowBlur=4;
-        ctx.fillText('$'+Math.round(val/1000)+'K', last.x+5, last.y+4);
+        ctx.textBaseline='middle';
+        ctx.fillText('$'+Math.round(val/1000)+'K', x+6, y);
         ctx.restore();
       });
     }
@@ -372,10 +474,11 @@ function renderPositionTable(d){
   const rows=positions.map((p,i)=>{
     const col=tickerColor(p.ticker,i);
     const sec=d.sectors[p.ticker]?d.sectors[p.ticker].sector:'Other';
+    const glow=glowFor(p.ticker);
     const rcClass=p.rc_pct>25?'tag-high':p.rc_pct>12?'tag-med':'tag-low';
     const retColor=p.ann_ret>=0?'var(--green)':'var(--red)';
     return '<tr>'+
-      '<td><span class="ticker-cell" style="color:#fff;background:'+col+';padding:3px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.22);display:inline-block">'+p.ticker+'</span>'+
+      '<td><span style="color:#fff;background:#000;padding:3px 10px;border-radius:5px;display:inline-block;box-shadow:0 0 10px 2px '+glow+',0 0 20px 4px '+glow.replace(/[\d.]+\)$/,'0.18)')+';font-family:\'Space Grotesk\',sans-serif;font-size:12px;font-weight:800">'+p.ticker+'</span>'+
       '<div style="font-size:10px;color:var(--text-dim);font-weight:500;margin-top:3px">'+sec+'</div></td>'+
       '<td style="font-weight:800">'+p.weight+'%</td>'+
       '<td style="font-weight:700;color:'+retColor+'">'+(p.ann_ret>=0?'+':'')+p.ann_ret+'%</td>'+
@@ -429,7 +532,7 @@ function buildScenarioTable(key,s){
     const adjColor=r.contrib_adj_pct>=0?'var(--green)':'var(--red)';
     const initOnly=r.initial_only_pct;
     return '<tr>'+
-      '<td><span class="ticker-cell" style="color:#fff;background:'+col+';padding:3px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.22);display:inline-block">'+r.ticker+'</span></td>'+
+      '<td><span style="color:#fff;background:#000;padding:3px 10px;border-radius:5px;display:inline-block;box-shadow:0 0 10px 2px '+glowFor(r.ticker)+';font-family:\'Space Grotesk\',sans-serif;font-size:12px;font-weight:800">'+r.ticker+'</span></td>'+
       '<td style="font-family:\'DM Mono\',monospace">$'+r.init.toLocaleString()+'</td>'+
       '<td style="font-family:\'DM Mono\',monospace">$'+r.biweekly.toFixed(2)+'</td>'+
       '<td style="font-weight:700;color:var(--purple-mid)">'+(r.ann_r>=0?'+':'')+r.ann_r+'%</td>'+
@@ -484,28 +587,20 @@ function sortScenario(key,col){
 // ── Smart suggestions ─────────────────────────────────────────────────────────
 async function runSmart(){
   if(tickers.length<1){ showStatus('Add tickers first.',true); return; }
-  const prompt = document.getElementById('smartPrompt')?.value?.trim() || '';
-  const btn = document.getElementById('smartBtn');
-  const refineBtn = document.querySelector('.smart-panel .btn-smart');
-  if(btn) btn.disabled = true;
-  if(refineBtn) refineBtn.disabled = true;
-  showStatus(ANTHROPIC_ENABLED
-    ? (prompt ? 'Asking Claude: "' + prompt + '"…' : 'Claude is analysing your portfolio…')
-    : 'Analysing portfolio concentration…');
+  const promptEl=document.getElementById('smartPrompt');
+  const prompt=promptEl?promptEl.value.trim():'';
+  const btn=document.getElementById('smartBtn');
+  if(btn) btn.disabled=true;
+  showStatus('Analysing your portfolio…');
   try{
     const res=await fetch('/api/smart',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tickers, weights:tickers.map(()=>1/tickers.length), user_prompt:prompt})});
+      body:JSON.stringify({tickers,weights:tickers.map(()=>1/tickers.length),user_prompt:prompt})});
     const data=await res.json();
-    hideStatus(); renderSmart(data);
+    hideStatus();
+    renderSmart(data);
   } catch(e){ showStatus('Could not load suggestions: '+e.message,true); }
-  finally{
-    if(btn) btn.disabled = false;
-    if(refineBtn) refineBtn.disabled = false;
-  }
+  finally{ if(btn) btn.disabled=false; }
 }
-
-// Whether Claude is powering suggestions (set after first smart call)
-let ANTHROPIC_ENABLED = true;
 
 function impactTag(label,val,posGood=true){
   const num=parseFloat(val);
@@ -515,40 +610,41 @@ function impactTag(label,val,posGood=true){
 }
 
 function renderSmart(data){
-  ANTHROPIC_ENABLED = data.powered_by !== 'database';
+  // Update risk panel with any additional warnings from smart suggestions
+  if(lastPositionData) renderRiskPanel(lastPositionData, data.warnings||[]);
 
   // Powered-by badge
-  const pbEl = document.getElementById('smartPoweredBy');
-  if(pbEl) pbEl.textContent = data.powered_by === 'claude'
-    ? '✦ Powered by Claude AI' : '◈ Curated database';
+  const pbEl=document.getElementById('smartPoweredBy');
+  if(pbEl) pbEl.textContent=data.powered_by==='claude'?'✦ Powered by Claude AI':'◈ Curated database';
 
-  // Portfolio analysis banner (Claude only)
-  const analysisEl = document.getElementById('smartAnalysis');
+  // Portfolio analysis banner
+  const analysisEl=document.getElementById('smartAnalysis');
   if(analysisEl){
     if(data.portfolio_analysis){
-      analysisEl.textContent = data.portfolio_analysis;
-      analysisEl.style.display = 'block';
-    } else {
-      analysisEl.style.display = 'none';
-    }
+      analysisEl.textContent=data.portfolio_analysis;
+      analysisEl.style.display='block';
+    } else { analysisEl.style.display='none'; }
   }
 
-  document.getElementById('smartWarnings').innerHTML=(data.warnings||[]).map(w=>'<div class="warning-item">'+w+'</div>').join('');
+  // Hide old yellow warnings - they're now in the risk panel
+  document.getElementById('smartWarnings').innerHTML='';
 
   function cardHTML(s){
-    const col=TICKER_COLORS[s.ticker]||'#5b21b6';
+    const glow=glowFor(s.ticker);
+    const col=tickerColor(s.ticker,0);
     const sd=s.sharpe_delta||0, vd=s.vol_delta||0, rd=s.ret_delta||0;
-    // Show why_now from Claude if available (embedded in desc after ' — ')
-    const parts = (s.desc||'').split(' — ');
-    const company = parts[0] || s.ticker;
-    const whyNow  = parts.slice(1).join(' — ');
+    const parts=(s.desc||'').split(' — ');
+    const company=parts[0]||s.ticker;
+    const whyNow=parts.slice(1).join(' — ');
+    const retVal=typeof s.exp_return==='number'?s.exp_return:(parseFloat(s.exp_return)||0);
+    const volVal=typeof s.ann_vol==='number'?s.ann_vol:(parseFloat(s.ann_vol)||0);
     return '<div class="smart-card">'+
       '<div class="smart-card-top"><div>'+
-        '<div class="smart-ticker" style="color:#fff;background:'+col+';padding:2px 9px;border-radius:4px;display:inline-block;border:1px solid rgba(255,255,255,0.2);font-size:12px">'+s.ticker+'</div>'+
+        '<div class="smart-ticker" style="color:#fff;background:#000;padding:3px 10px;border-radius:5px;display:inline-block;box-shadow:0 0 12px 3px '+glow+',0 0 24px 5px '+glow.replace(/[\d.]+\)$/,'0.2)')+';font-size:12px;font-weight:800">'+s.ticker+'</div>'+
         '<div class="smart-sector" style="margin-top:4px">'+s.sector+'</div></div>'+
         '<div style="text-align:right">'+
-          '<div style="font-size:13px;font-weight:800;color:var(--green)">'+(s.exp_return*100).toFixed(0)+'%</div>'+
-          '<div style="font-size:10px;color:var(--text-dim);font-family:\'DM Mono\',monospace">vol '+(s.ann_vol*100).toFixed(0)+'%</div>'+
+          '<div style="font-size:13px;font-weight:800;color:var(--green)">'+(retVal*100).toFixed(0)+'%</div>'+
+          '<div style="font-size:10px;color:var(--text-dim);font-family:\'DM Mono\',monospace">vol '+(volVal*100).toFixed(0)+'%</div>'+
         '</div></div>'+
       (company?'<div class="smart-desc" style="font-weight:600;color:var(--text-muted);margin-bottom:4px">'+company+'</div>':'')+
       (whyNow?'<div style="font-size:11px;color:var(--purple-mid);font-style:italic;margin-bottom:6px">'+whyNow+'</div>':'')+
