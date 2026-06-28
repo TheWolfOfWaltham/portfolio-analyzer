@@ -2,102 +2,132 @@ from flask import Blueprint, request, jsonify
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from portfolio_engine import (fetch_returns, build_cov, optimize, efficient_frontier,
-                               monte_carlo, correlation_matrix, risk_contributions,
-                               portfolio_stats, scenario_projections, smart_suggestions)
+                               monte_carlo, risk_contributions, portfolio_stats,
+                               scenario_projections, smart_suggestions_v2)
 import numpy as np
 
-api_bp = Blueprint("api", __name__)
+api_bp = Blueprint('api', __name__)
 
 SECTOR_MAP = {
-    "GLW":"AI Infra Optical","SNDK":"Semiconductors","NBIS":"AI Cloud Infra",
-    "GEV":"Power Infra","MRVL":"Custom ASIC","COHR":"Optical Transceivers",
-    "ANET":"AI Networking","VST":"Power Generation","NOW":"Enterprise SaaS",
-    "CEG":"Nuclear Power","MU":"Semiconductors","AVGO":"Semiconductors",
-    "WMT":"Consumer Staples","JPM":"Financials","JNJ":"Healthcare",
-    "BRK/B":"Conglomerate","PG":"Consumer Staples","SOFI":"Fintech",
-    "CRWD":"Cybersecurity","NEE":"Utilities","LITE":"AI Infra Optical","ETR":"Utility",
+    'GLW':'AI Infra Optical','SNDK':'Semiconductors','NBIS':'AI Cloud Infra',
+    'GEV':'Power Infra','MRVL':'Custom ASIC','COHR':'Optical Transceivers',
+    'ANET':'AI Networking','VST':'Power Generation','NOW':'Enterprise SaaS',
+    'CEG':'Nuclear Power','MU':'Semiconductors','AVGO':'Semiconductors',
+    'WMT':'Consumer Staples','JPM':'Financials','JNJ':'Healthcare',
+    'BRK/B':'Conglomerate','PG':'Consumer Staples','SOFI':'Fintech',
+    'CRWD':'Cybersecurity','NEE':'Utilities','LITE':'AI Infra Optical','ETR':'Utility',
 }
 SECTOR_COLORS = {
-    "Semiconductors":"#e65100","AI Cloud Infra":"#2e7d32","AI Infra Optical":"#1565c0",
-    "Power Infra":"#b71c1c","Custom ASIC":"#4a148c","Optical Transceivers":"#00695c",
-    "AI Networking":"#1a237e","Power Generation":"#1b5e20","Enterprise SaaS":"#4e342e",
-    "Nuclear Power":"#880e4f","Financials":"#0d47a1","Consumer Staples":"#558b2f",
-    "Healthcare":"#006064","Conglomerate":"#37474f","Fintech":"#f57f17",
-    "Cybersecurity":"#4a148c","Utilities":"#006064","Utility":"#33691e","Other":"#78909c",
+    'Semiconductors':'#e65100','AI Cloud Infra':'#22c55e','AI Infra Optical':'#6b3aff',
+    'Power Infra':'#f43f5e','Custom ASIC':'#c084ff','Optical Transceivers':'#2dd4bf',
+    'AI Networking':'#60a5fa','Power Generation':'#a3e635','Enterprise SaaS':'#94a3b8',
+    'Nuclear Power':'#f59e0b','Financials':'#facc15','Consumer Staples':'#4ade80',
+    'Healthcare':'#fb7185','Conglomerate':'#86efac','Fintech':'#fb923c',
+    'Cybersecurity':'#818cf8','Utilities':'#34d399','Utility':'#bef264','Other':'#5a5270',
+}
+# Macro bucket mapping
+MACRO_BUCKET = {
+    'Semiconductors':'AI Compute','AI Cloud Infra':'AI Compute',
+    'AI Infra Optical':'AI Infrastructure','Optical Transceivers':'AI Infrastructure',
+    'AI Networking':'AI Infrastructure','Custom ASIC':'AI Infrastructure',
+    'Power Infra':'Power & Energy','Power Generation':'Power & Energy','Nuclear Power':'Power & Energy',
+    'Enterprise SaaS':'Growth/SaaS','Fintech':'Growth/SaaS','Cybersecurity':'Growth/SaaS',
+    'Consumer Staples':'Defensive','Healthcare':'Defensive','Conglomerate':'Defensive',
+    'Financials':'Defensive','Utilities':'Defensive','Utility':'Defensive','Other':'Other',
+}
+MACRO_COLORS = {
+    'AI Compute':'#9b6dff','AI Infrastructure':'#2dd4bf',
+    'Power & Energy':'#f43f5e','Growth/SaaS':'#fbbf24','Defensive':'#4ade80','Other':'#5a5270',
 }
 
 def _sectors(tickers):
-    return {t: {"sector": SECTOR_MAP.get(t,"Other"),
-                "color":  SECTOR_COLORS.get(SECTOR_MAP.get(t,"Other"), "#78909c")}
-            for t in tickers}
+    out = {}
+    for t in tickers:
+        sec = SECTOR_MAP.get(t,'Other')
+        out[t] = {
+            'sector': sec,
+            'color': SECTOR_COLORS.get(sec,'#5a5270'),
+            'macro': MACRO_BUCKET.get(sec,'Other'),
+            'macro_color': MACRO_COLORS.get(MACRO_BUCKET.get(sec,'Other'),'#5a5270'),
+        }
+    return out
 
+def _exposure(tickers, weights, sectors):
+    macro = {}
+    sub   = {}
+    for t, w in zip(tickers, weights):
+        s = sectors[t]
+        m = s['macro']
+        sec = s['sector']
+        macro[m] = macro.get(m,0) + w*100
+        sub[sec]  = sub.get(sec,0)  + w*100
+    return {
+        'macro': {k: round(v,1) for k,v in sorted(macro.items(), key=lambda x:-x[1])},
+        'sub':   {k: round(v,1) for k,v in sorted(sub.items(),   key=lambda x:-x[1])},
+        'macro_colors': {m: MACRO_COLORS.get(m,'#5a5270') for m in macro},
+        'sub_colors':   {s: SECTOR_COLORS.get(s,'#5a5270') for s in sub},
+    }
 
-@api_bp.route("/analyze", methods=["POST"])
+@api_bp.route('/analyze', methods=['POST'])
 def analyze():
     body     = request.get_json(force=True)
-    tickers  = [t.strip().upper() for t in body.get("tickers", [])]
-    capital  = float(body.get("capital", 10000))
-    biweekly = float(body.get("biweekly", 500))
-    mode     = body.get("mode", "sharpe")
-
+    tickers  = [t.strip().upper() for t in body.get('tickers', [])]
+    capital  = float(body.get('capital', 10000))
+    biweekly = float(body.get('biweekly', 500))
+    mode     = body.get('mode', 'sharpe')
     if len(tickers) < 2:
-        return jsonify({"error": "Add at least 2 tickers."}), 400
-
+        return jsonify({'error': 'Add at least 2 tickers.'}), 400
     data, is_live = fetch_returns(tickers)
-
     if len(data) < 2:
-        return jsonify({"error": "Could not load data for these tickers."}), 400
-
-    tickers = list(data.keys())
-    mu  = np.array([data[t]["ann_ret"] for t in tickers])
-    cov = build_cov(tickers, data)
-
-    weights   = optimize(mu.tolist(), cov, mode)
+        return jsonify({'error': 'Could not load data for these tickers.'}), 400
+    tickers  = list(data.keys())
+    mu       = np.array([data[t]['ann_ret'] for t in tickers])
+    cov      = build_cov(tickers, data)
+    weights  = optimize(mu.tolist(), cov, mode)
     port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov)
-
+    rc       = risk_contributions(weights, cov)
+    sectors  = _sectors(tickers)
+    exposure = _exposure(tickers, weights, sectors)
     positions = [{
-        "ticker":  t,
-        "weight":  round(weights[i]*100, 1),
-        "dollars": round(weights[i]*capital, 2),
-        "price":   data[t]["price"],
-        "ann_ret": round(data[t]["ann_ret"]*100, 1),
-        "ann_vol": round(data[t]["ann_vol"]*100, 1),
-        "sharpe":  round(data[t]["sharpe"], 2),
-        "rc_pct":  round(risk_contributions(weights, cov)[i]*100, 1),
+        'ticker':  t,
+        'weight':  round(weights[i]*100, 1),
+        'dollars': round(weights[i]*capital, 2),
+        'price':   data[t]['price'],
+        'ann_ret': round(data[t]['ann_ret']*100, 1),
+        'ann_vol': round(data[t]['ann_vol']*100, 1),
+        'sharpe':  round(data[t]['sharpe'], 2),
+        'rc_pct':  round(rc[i]*100, 1),
     } for i, t in enumerate(tickers)]
-
     return jsonify({
-        "tickers":   tickers,
-        "weights":   [round(w*100, 1) for w in weights],
-        "positions": positions,
-        "portfolio": {
-            "ann_ret":       round(port_ret*100, 1),
-            "ann_vol":       round(port_vol*100, 1),
-            "sharpe":        round(sharpe, 2),
-            "port_3yr_geom": round(((1+port_ret-0.5*port_vol**2)**3-1)*100, 1),
-            "var_95":        round(-1.645*port_vol*100, 1),
-            "max_dd_est":    round(-2.5*port_vol*100, 1),
+        'tickers':   tickers,
+        'weights':   [round(w*100,1) for w in weights],
+        'positions': positions,
+        'portfolio': {
+            'ann_ret':       round(port_ret*100,1),
+            'ann_vol':       round(port_vol*100,1),
+            'sharpe':        round(sharpe,2),
+            'port_3yr_geom': round(((1+port_ret-0.5*port_vol**2)**3-1)*100,1),
+            'var_95':        round(-1.645*port_vol*100,1),
+            'max_dd_est':    round(-2.5*port_vol*100,1),
         },
-        "frontier":  efficient_frontier(mu.tolist(), cov),
-        "mc_paths":  monte_carlo(port_ret, port_vol, capital),
-        "corr":      correlation_matrix(tickers, data),
-        "rc":        risk_contributions(weights, cov),
-        "scenarios": scenario_projections(tickers, weights, capital, biweekly, data),
-        "sectors":   _sectors(tickers),
-        "capital":   capital,
-        "biweekly":  biweekly,
-        "mode":      mode,
-        "is_live":   is_live,
-        "data_note": "Live Alpaca data" if is_live else
-                     "Simulated data — calibrated to known return/vol priors. "
-                     "Live data loads when running locally with valid Alpaca credentials.",
+        'frontier':  efficient_frontier(mu.tolist(), cov),
+        'mc_paths':  monte_carlo(port_ret, port_vol, capital),
+        'scenarios': scenario_projections(tickers, weights, capital, biweekly, data),
+        'sectors':   sectors,
+        'exposure':  exposure,
+        'capital':   capital,
+        'biweekly':  biweekly,
+        'mode':      mode,
+        'is_live':   is_live,
+        'data_note': 'Live Alpaca market data' if is_live else
+                     'Simulated data — calibrated to real return/vol priors. Live data loads with valid Alpaca credentials.',
     })
 
-
-@api_bp.route("/smart", methods=["POST"])
+@api_bp.route('/smart', methods=['POST'])
 def smart():
     body    = request.get_json(force=True)
-    tickers = [t.strip().upper() for t in body.get("tickers", [])]
-    weights = body.get("weights", [1/max(len(tickers),1)]*len(tickers))
-    result  = smart_suggestions(tickers, weights, {})
+    tickers = [t.strip().upper() for t in body.get('tickers', [])]
+    weights = body.get('weights', [1/max(len(tickers),1)]*len(tickers))
+    data, _ = fetch_returns(tickers) if tickers else ({}, False)
+    result  = smart_suggestions_v2(tickers, weights, data)
     return jsonify(result)
