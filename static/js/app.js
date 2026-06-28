@@ -51,35 +51,47 @@ function initStars(){
   if(!canvas) return;
   const ctx = canvas.getContext('2d');
   let stars = [];
+  let W = 0, H = 0;
+
   function resize(){
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width  = W;
+    canvas.height = H;
   }
   resize();
   window.addEventListener('resize', resize);
-  for(let i=0;i<160;i++) stars.push({
-    x: Math.random()*window.innerWidth,
-    y: Math.random()*window.innerHeight,
-    size: Math.random()*1.1+0.3,
-    phase: Math.random()*Math.PI*2,
-    speed: Math.random()*0.007+0.002,
-    alpha: Math.random()*0.65+0.2,
-  });
-  function drawPlus(x,y,s,a){
-    ctx.save(); ctx.globalAlpha=a;
-    ctx.strokeStyle='rgba(200,195,255,0.9)';
-    ctx.lineWidth=s*0.6; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(x-s,y); ctx.lineTo(x+s,y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x,y-s); ctx.lineTo(x,y+s); ctx.stroke();
+
+  function makeStar(){
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      size: Math.random() * 1.1 + 0.3,
+      phase: Math.random() * Math.PI * 2,
+      speed: Math.random() * 0.006 + 0.002,
+      alpha: Math.random() * 0.65 + 0.25,
+    };
+  }
+  for(let i = 0; i < 160; i++) stars.push(makeStar());
+
+  function drawPlus(x, y, s, a){
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = 'rgba(220,215,255,0.95)';
+    ctx.lineWidth = s * 0.6;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x-s, y); ctx.lineTo(x+s, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y-s); ctx.lineTo(x, y+s); ctx.stroke();
     ctx.restore();
   }
-  let t=0;
+
+  let frame = 0;
   function animate(){
-    t++;
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    stars.forEach(s=>{
-      const a=s.alpha*(0.2+0.8*Math.abs(Math.sin(s.phase+t*s.speed*0.8)));
-      drawPlus(s.x,s.y,s.size,a);
+    frame++;
+    ctx.clearRect(0, 0, W, H);
+    stars.forEach(s => {
+      const a = s.alpha * (0.2 + 0.8 * Math.abs(Math.sin(s.phase + frame * s.speed)));
+      drawPlus(s.x, s.y, s.size, a);
     });
     requestAnimationFrame(animate);
   }
@@ -94,7 +106,7 @@ function renderChips(){
     const col=tickerColor(t,i);
     const chip=document.createElement('span');
     chip.className='ticker-chip';
-    chip.style.cssText='background:'+col+'33;color:'+col+';border:1px solid '+col+'66';
+    chip.style.cssText='background:'+col+'33;color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.22);box-shadow:0 0 0 0.5px rgba(255,255,255,0.06)';
     chip.innerHTML=t+'<button onclick="removeTicker('+i+')">✕</button>';
     row.insertBefore(chip,document.getElementById('tickerField'));
   });
@@ -299,8 +311,8 @@ function renderPositionTable(d){
     const rcClass=p.rc_pct>25?'tag-high':p.rc_pct>12?'tag-med':'tag-low';
     const retColor=p.ann_ret>=0?'var(--green)':'var(--red)';
     return '<tr>'+
-      '<td><span class="ticker-cell" style="color:'+col+'">'+p.ticker+'</span>'+
-      '<div style="font-size:10px;color:var(--text-dim);font-weight:500;margin-top:1px">'+sec+'</div></td>'+
+      '<td><span class="ticker-cell" style="color:#fff;background:'+col+';padding:3px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.22);display:inline-block">'+p.ticker+'</span>'+
+      '<div style="font-size:10px;color:var(--text-dim);font-weight:500;margin-top:3px">'+sec+'</div></td>'+
       '<td style="font-weight:800">'+p.weight+'%</td>'+
       '<td style="font-weight:700;color:'+retColor+'">'+(p.ann_ret>=0?'+':'')+p.ann_ret+'%</td>'+
       '<td style="font-family:\'DM Mono\',monospace">'+p.ann_vol+'%</td>'+
@@ -353,7 +365,7 @@ function buildScenarioTable(key,s){
     const adjColor=r.contrib_adj_pct>=0?'var(--green)':'var(--red)';
     const initOnly=r.initial_only_pct;
     return '<tr>'+
-      '<td><span class="ticker-cell" style="color:'+col+'">'+r.ticker+'</span></td>'+
+      '<td><span class="ticker-cell" style="color:#fff;background:'+col+';padding:3px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.22);display:inline-block">'+r.ticker+'</span></td>'+
       '<td style="font-family:\'DM Mono\',monospace">$'+r.init.toLocaleString()+'</td>'+
       '<td style="font-family:\'DM Mono\',monospace">$'+r.biweekly.toFixed(2)+'</td>'+
       '<td style="font-weight:700;color:var(--purple-mid)">'+(r.ann_r>=0?'+':'')+r.ann_r+'%</td>'+
