@@ -45,7 +45,7 @@ let scenarioSortState = {}; // per-scenario sort state
 
 function tickerColor(t,i){ return TICKER_COLORS[t]||PALETTE[i%PALETTE.length]; }
 
-// ── Full-page fixed stars (visible in sidebars) ───────────────────────────────
+// ── Stars — screen blend mode overlay, appears over all content ───────────────
 function initStars(){
   const canvas = document.getElementById('starsCanvas');
   if(!canvas) return;
@@ -66,19 +66,20 @@ function initStars(){
     return {
       x: Math.random() * W,
       y: Math.random() * H,
-      size: Math.random() * 1.1 + 0.3,
+      size: Math.random() * 1.2 + 0.3,
       phase: Math.random() * Math.PI * 2,
       speed: Math.random() * 0.006 + 0.002,
-      alpha: Math.random() * 0.65 + 0.25,
+      peak: Math.random() * 0.28 + 0.08, // max brightness — keep subtle
     };
   }
-  for(let i = 0; i < 160; i++) stars.push(makeStar());
+  for(let i = 0; i < 180; i++) stars.push(makeStar());
 
   function drawPlus(x, y, s, a){
     ctx.save();
+    // screen blend: draw white on black → shows through everything
     ctx.globalAlpha = a;
-    ctx.strokeStyle = 'rgba(220,215,255,0.95)';
-    ctx.lineWidth = s * 0.6;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = s * 0.65;
     ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x-s, y); ctx.lineTo(x+s, y); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x, y-s); ctx.lineTo(x, y+s); ctx.stroke();
@@ -88,9 +89,11 @@ function initStars(){
   let frame = 0;
   function animate(){
     frame++;
-    ctx.clearRect(0, 0, W, H);
+    // fill black so screen blend shows only the stars
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
     stars.forEach(s => {
-      const a = s.alpha * (0.2 + 0.8 * Math.abs(Math.sin(s.phase + frame * s.speed)));
+      const a = s.peak * (0.15 + 0.85 * Math.abs(Math.sin(s.phase + frame * s.speed)));
       drawPlus(s.x, s.y, s.size, a);
     });
     requestAnimationFrame(animate);
@@ -184,7 +187,9 @@ function renderKPIs(d){
 function renderStackedBar(d){
   const bar=document.getElementById('stackedBar'), leg=document.getElementById('stackedLegend');
   bar.innerHTML=''; leg.innerHTML='';
-  d.positions.forEach((p,i)=>{
+  // Sort by weight descending — left = most weighted
+  const sorted=[...d.positions].sort((a,b)=>b.weight-a.weight);
+  sorted.forEach((p,i)=>{
     const col=tickerColor(p.ticker,i);
     const seg=document.createElement('div');
     seg.className='seg'+(p.weight<8?' seg-sm':'');
@@ -201,31 +206,20 @@ function renderStackedBar(d){
 function renderExposure(d){
   if(!d.exposure){ document.getElementById('exposureCard').innerHTML=''; return; }
   const exp=d.exposure;
-  const macro=exp.macro, sub=exp.sub;
-  const maxSub=Math.max(...Object.values(sub));
+  const macro=exp.macro;
 
-  // Macro bar - use our local MACRO_COLORS for consistency
+  // Sort macro by weight descending — left = most weighted
+  const sorted=Object.entries(macro).sort((a,b)=>b[1]-a[1]);
+
   let macroHTML='<div class="exposure-macro-bar">';
-  Object.entries(macro).forEach(([label,pct])=>{
+  sorted.forEach(([label,pct])=>{
     const col=MACRO_COLORS[label]||'#1e1b4b';
     macroHTML+='<div class="exp-seg" style="width:'+pct+'%;background:'+col+'">'+
       '<span class="exp-seg-label">'+label+'</span>'+
       '<span class="exp-seg-pct">'+pct+'%</span></div>';
   });
   macroHTML+='</div>';
-
-  // Sub bars - inherit macro color
-  let subHTML='<div class="exposure-sub-label">Sub-sector breakdown</div><div class="sub-bars">';
-  Object.entries(sub).forEach(([label,pct])=>{
-    const macroKey=SUB_TO_MACRO[label]||'Other';
-    const col=MACRO_COLORS[macroKey]||'#1e1b4b';
-    subHTML+='<div class="sub-bar-row">'+
-      '<div class="sub-bar-label">'+label+'</div>'+
-      '<div class="sub-bar-bg"><div class="sub-bar-fill" style="width:'+(pct/maxSub*100).toFixed(0)+'%;background:'+col+'"></div></div>'+
-      '<div class="sub-bar-pct" style="color:'+col+'">'+pct+'%</div></div>';
-  });
-  subHTML+='</div>';
-  document.getElementById('exposureCard').innerHTML=macroHTML+subHTML;
+  document.getElementById('exposureCard').innerHTML=macroHTML;
 }
 
 // ── Frontier ──────────────────────────────────────────────────────────────────
@@ -257,7 +251,7 @@ function renderMonteCarlo(d){
   const p5=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.05)));
   const p50=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.50)));
   const p95=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.95)));
-  const pDs=paths.slice(0,40).map(p=>({data:p,borderColor:'rgba(107,58,255,0.06)',borderWidth:.8,pointRadius:0,fill:false,tension:.3}));
+  const pDs=paths.slice(0,200).map(p=>({data:p,borderColor:'rgba(155,109,255,0.10)',borderWidth:0.8,pointRadius:0,fill:false,tension:.3}));
   chartInstances['mc']=new Chart(document.getElementById('mcChart').getContext('2d'),{
     type:'line',
     data:{labels,datasets:[...pDs,
