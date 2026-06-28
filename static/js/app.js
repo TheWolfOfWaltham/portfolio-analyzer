@@ -41,7 +41,15 @@ const SUB_TO_MACRO = {
 const DEFAULT_TICKERS = ['GLW','SNDK','NBIS','GEV','MRVL','COHR','ANET','VST','NOW'];
 let tickers = [], currentMode = 'sharpe', chartInstances = {};
 let sortCol = 'weight', sortDir = 'desc', lastPositionData = null;
-let scenarioSortState = {}; // per-scenario sort state
+let scenarioSortState = {};
+
+// Contribution frequency
+const FREQ = {
+  weekly:   {label:'Weekly',   col:'Weekly DCA ($)',   periods:52, toAnnual:v=>v*52},
+  biweekly: {label:'Biweekly', col:'Biweekly DCA ($)', periods:26, toAnnual:v=>v*26},
+  monthly:  {label:'Monthly',  col:'Monthly DCA ($)',  periods:12, toAnnual:v=>v*12},
+};
+let currentFreq = 'biweekly';
 
 function tickerColor(t,i){ return TICKER_COLORS[t]||PALETTE[i%PALETTE.length]; }
 
@@ -129,8 +137,32 @@ document.getElementById('tickerField').addEventListener('blur',e=>{
   if(e.target.value.trim()){ addTicker(e.target.value); e.target.value=''; }
 });
 function setMode(btn){ document.querySelectorAll('.mode-tab').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); currentMode=btn.dataset.mode; }
+function setFreq(btn){
+  document.querySelectorAll('.freq-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFreq = btn.dataset.freq;
+  updateRothDisplay();
+}
 function loadDefault(){ tickers=[...DEFAULT_TICKERS]; renderChips(); }
 function clearAll(){ tickers=[]; renderChips(); }
+
+function updateRothDisplay(){
+  const contribVal = +document.getElementById('biweekly').value || 0;
+  const rothVal    = +document.getElementById('rothBiweekly').value || 0;
+  const freq = FREQ[currentFreq];
+  const annualTotal = freq.toAnnual(contribVal);
+  const rothAnnual  = freq.toAnnual(rothVal);
+  const roth3yr     = rothAnnual * 3;
+  const limit2026   = 7000;
+  const overLimit   = rothAnnual > limit2026;
+  document.getElementById('rothDisplay').innerHTML =
+    '<div class="roth-row"><span>Annual ' + freq.label + ' (total)</span><span>$' + annualTotal.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>' +
+    '<div class="roth-row"><span>Roth annual contribution</span><span' + (overLimit?' style="color:var(--amber)"':' style="color:var(--green)"') + '>$' + rothAnnual.toLocaleString(undefined,{maximumFractionDigits:2}) + (overLimit?' ⚠':'') + '</span></div>' +
+    (overLimit?'<div class="roth-warn">Exceeds 2026 IRA limit of $7,000 — consult a tax advisor</div>':'')+
+    '<div class="roth-row"><span>Roth 3yr total deposits</span><span>$' + roth3yr.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>';
+}
+document.getElementById('biweekly').addEventListener('input', updateRothDisplay);
+document.getElementById('rothBiweekly').addEventListener('input', updateRothDisplay);
 
 // ── Status ────────────────────────────────────────────────────────────────────
 function showStatus(msg,isErr=false){
@@ -147,10 +179,13 @@ async function runAnalysis(){
   document.getElementById('analyzeBtn').disabled=true;
   document.getElementById('results').className='';
   try{
+    const rawContrib = +document.getElementById('biweekly').value;
+    const annualContrib = FREQ[currentFreq].toAnnual(rawContrib);
+    const biweeklyEquiv = annualContrib / 26; // normalize to biweekly for backend
     const res=await fetch('/api/analyze',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tickers,capital:+document.getElementById('capital').value,
-        biweekly:+document.getElementById('biweekly').value, mode:currentMode})
+        biweekly:biweeklyEquiv, mode:currentMode})
     });
     const data=await res.json();
     if(data.error){ showStatus(data.error,true); return; }
@@ -174,13 +209,22 @@ function renderAll(d){
 // ── KPIs ──────────────────────────────────────────────────────────────────────
 function renderKPIs(d){
   const p=d.portfolio;
+  const rawRoth = +document.getElementById('rothBiweekly').value || 0;
+  const annualRoth = FREQ[currentFreq].toAnnual(rawRoth);
+  const rothBiweekly = annualRoth / 26;
+  // FV of Roth contributions over 3yr at portfolio geometric return
+  const geomR = (p.ann_ret/100) - 0.5*Math.pow(p.ann_vol/100,2);
+  const rPerPeriod = (1+geomR)**(1/26)-1;
+  const roth3yrFV = rPerPeriod > 0
+    ? rothBiweekly * ((Math.pow(1+rPerPeriod,26*3)-1)/rPerPeriod)
+    : rothBiweekly * 26 * 3;
   document.getElementById('kpiStrip').innerHTML=
     '<div class="kpi kpi-green"><div class="kpi-label">Exp. Annual Return</div><div class="kpi-val">'+p.ann_ret+'%</div><div class="kpi-sub">forward estimate</div></div>'+
     '<div class="kpi"><div class="kpi-label">Portfolio Volatility</div><div class="kpi-val" style="color:var(--text)">'+p.ann_vol+'%</div><div class="kpi-sub">annualized</div></div>'+
     '<div class="kpi kpi-purple"><div class="kpi-label">Sharpe Ratio</div><div class="kpi-val">'+p.sharpe+'</div><div class="kpi-sub">rf = 4.5%</div></div>'+
     '<div class="kpi kpi-green"><div class="kpi-label">3yr Compounded</div><div class="kpi-val">+'+p.port_3yr_geom+'%</div><div class="kpi-sub">geometric mean</div></div>'+
-    '<div class="kpi kpi-red"><div class="kpi-label">VaR 95% (1yr)</div><div class="kpi-val">'+p.var_95+'%</div><div class="kpi-sub">1-in-20 year</div></div>'+
-    '<div class="kpi kpi-red"><div class="kpi-label">Est. Max Drawdown</div><div class="kpi-val">'+p.max_dd_est+'%</div><div class="kpi-sub">2.5\u03c3 stress</div></div>';
+    '<div class="kpi kpi-red"><div class="kpi-label">Est. Max Drawdown</div><div class="kpi-val">'+p.max_dd_est+'%</div><div class="kpi-sub">2.5\u03c3 stress</div></div>'+
+    '<div class="kpi kpi-purple"><div class="kpi-label">Roth IRA — 3yr Est.</div><div class="kpi-val" style="font-size:18px">$'+Math.round(roth3yrFV).toLocaleString()+'</div><div class="kpi-sub">DCA @ portfolio return</div></div>';
 }
 
 // ── Stacked bar ───────────────────────────────────────────────────────────────
@@ -252,8 +296,34 @@ function renderMonteCarlo(d){
   const p50=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.50)));
   const p95=labels.map((_,t)=>Math.round(pct(paths.map(p=>p[t]),.95)));
   const pDs=paths.slice(0,200).map(p=>({data:p,borderColor:'rgba(155,109,255,0.10)',borderWidth:0.8,pointRadius:0,fill:false,tension:.3}));
+  const mcEndLabels = {
+    id:'mcEndLabels',
+    afterDraw(chart){
+      const ctx=chart.ctx;
+      const ds=chart.data.datasets;
+      const named=ds.slice(-3); // 95th, Median, 5th
+      named.forEach((d,i)=>{
+        const idx=ds.length-3+i;
+        const meta=chart.getDatasetMeta(idx);
+        if(!meta.visible||!meta.data.length) return;
+        const last=meta.data[meta.data.length-1];
+        const val=d.data[d.data.length-1];
+        if(!val) return;
+        const col=typeof d.borderColor==='string'?d.borderColor:'#9b6dff';
+        ctx.save();
+        ctx.font='700 10px "Space Grotesk",sans-serif';
+        ctx.fillStyle=col;
+        ctx.textAlign='left';
+        ctx.shadowColor=col;
+        ctx.shadowBlur=4;
+        ctx.fillText('$'+Math.round(val/1000)+'K', last.x+5, last.y+4);
+        ctx.restore();
+      });
+    }
+  };
   chartInstances['mc']=new Chart(document.getElementById('mcChart').getContext('2d'),{
     type:'line',
+    plugins:[mcEndLabels],
     data:{labels,datasets:[...pDs,
       {label:'95th pct',data:p95,borderColor:'rgba(107,58,255,0.5)',borderWidth:1.5,borderDash:[4,3],pointRadius:0,fill:false},
       {label:'Median',data:p50,borderColor:'#9b6dff',borderWidth:2.5,pointRadius:0,fill:false},
@@ -346,7 +416,7 @@ function buildScenarioTable(key,s){
   const thS='cursor:pointer;user-select:none;white-space:nowrap';
   const hdrs=[
     {k:'ticker',l:'Ticker'},{k:'init',l:'Init Alloc ($)'},
-    {k:'biweekly',l:'Biweekly DCA ($)'},{k:'ann_r',l:'Ann. Growth'},
+    {k:'biweekly',l:FREQ[currentFreq].col},{k:'ann_r',l:'Ann. Growth'},
     {k:'yr1',l:'EOY Year 1'},{k:'yr2',l:'EOY Year 2'},{k:'yr3',l:'EOY Year 3'},
     {k:'contrib_adj_pct',l:'Total Return'},
   ].map(h=>'<th style="'+thS+'" onclick="sortScenario(\''+key+'\',\''+h.k+'\')">'+h.l+arrow(h.k)+'</th>').join('');
@@ -414,14 +484,28 @@ function sortScenario(key,col){
 // ── Smart suggestions ─────────────────────────────────────────────────────────
 async function runSmart(){
   if(tickers.length<1){ showStatus('Add tickers first.',true); return; }
-  showStatus('Running marginal impact analysis…');
+  const prompt = document.getElementById('smartPrompt')?.value?.trim() || '';
+  const btn = document.getElementById('smartBtn');
+  const refineBtn = document.querySelector('.smart-panel .btn-smart');
+  if(btn) btn.disabled = true;
+  if(refineBtn) refineBtn.disabled = true;
+  showStatus(ANTHROPIC_ENABLED
+    ? (prompt ? 'Asking Claude: "' + prompt + '"…' : 'Claude is analysing your portfolio…')
+    : 'Analysing portfolio concentration…');
   try{
     const res=await fetch('/api/smart',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tickers,weights:tickers.map(()=>1/tickers.length)})});
+      body:JSON.stringify({tickers, weights:tickers.map(()=>1/tickers.length), user_prompt:prompt})});
     const data=await res.json();
     hideStatus(); renderSmart(data);
-  } catch(e){ showStatus('Could not load suggestions.',true); }
+  } catch(e){ showStatus('Could not load suggestions: '+e.message,true); }
+  finally{
+    if(btn) btn.disabled = false;
+    if(refineBtn) refineBtn.disabled = false;
+  }
 }
+
+// Whether Claude is powering suggestions (set after first smart call)
+let ANTHROPIC_ENABLED = true;
 
 function impactTag(label,val,posGood=true){
   const num=parseFloat(val);
@@ -431,28 +515,54 @@ function impactTag(label,val,posGood=true){
 }
 
 function renderSmart(data){
+  ANTHROPIC_ENABLED = data.powered_by !== 'database';
+
+  // Powered-by badge
+  const pbEl = document.getElementById('smartPoweredBy');
+  if(pbEl) pbEl.textContent = data.powered_by === 'claude'
+    ? '✦ Powered by Claude AI' : '◈ Curated database';
+
+  // Portfolio analysis banner (Claude only)
+  const analysisEl = document.getElementById('smartAnalysis');
+  if(analysisEl){
+    if(data.portfolio_analysis){
+      analysisEl.textContent = data.portfolio_analysis;
+      analysisEl.style.display = 'block';
+    } else {
+      analysisEl.style.display = 'none';
+    }
+  }
+
   document.getElementById('smartWarnings').innerHTML=(data.warnings||[]).map(w=>'<div class="warning-item">'+w+'</div>').join('');
+
   function cardHTML(s){
     const col=TICKER_COLORS[s.ticker]||'#5b21b6';
+    const sd=s.sharpe_delta||0, vd=s.vol_delta||0, rd=s.ret_delta||0;
+    // Show why_now from Claude if available (embedded in desc after ' — ')
+    const parts = (s.desc||'').split(' — ');
+    const company = parts[0] || s.ticker;
+    const whyNow  = parts.slice(1).join(' — ');
     return '<div class="smart-card">'+
       '<div class="smart-card-top"><div>'+
-        '<div class="smart-ticker" style="color:'+col+'">'+s.ticker+'</div>'+
-        '<div class="smart-sector">'+s.sector+'</div></div>'+
+        '<div class="smart-ticker" style="color:#fff;background:'+col+';padding:2px 9px;border-radius:4px;display:inline-block;border:1px solid rgba(255,255,255,0.2);font-size:12px">'+s.ticker+'</div>'+
+        '<div class="smart-sector" style="margin-top:4px">'+s.sector+'</div></div>'+
         '<div style="text-align:right">'+
           '<div style="font-size:13px;font-weight:800;color:var(--green)">'+(s.exp_return*100).toFixed(0)+'%</div>'+
           '<div style="font-size:10px;color:var(--text-dim);font-family:\'DM Mono\',monospace">vol '+(s.ann_vol*100).toFixed(0)+'%</div>'+
         '</div></div>'+
-      '<div class="smart-desc">'+s.desc+'</div>'+
+      (company?'<div class="smart-desc" style="font-weight:600;color:var(--text-muted);margin-bottom:4px">'+company+'</div>':'')+
+      (whyNow?'<div style="font-size:11px;color:var(--purple-mid);font-style:italic;margin-bottom:6px">'+whyNow+'</div>':'')+
+      '<div class="smart-desc">'+s.rationale+'</div>'+
       '<div class="smart-impacts">'+
-        impactTag('Sharpe',(s.sharpe_delta>=0?'+':'')+s.sharpe_delta.toFixed(3),true)+
-        impactTag('Vol',(s.vol_delta>=0?'+':'')+s.vol_delta.toFixed(1)+'%',false)+
-        impactTag('Ret',(s.ret_delta>=0?'+':'')+s.ret_delta.toFixed(1)+'%',true)+
-        '<span class="impact-tag impact-neu">Corr: '+s.corr_to_book.toFixed(2)+'</span>'+
+        impactTag('Sharpe',(sd>=0?'+':'')+sd.toFixed(3),true)+
+        impactTag('Vol',(vd>=0?'+':'')+vd.toFixed(1)+'%',false)+
+        impactTag('Ret',(rd>=0?'+':'')+rd.toFixed(1)+'%',true)+
+        '<span class="impact-tag impact-neu">Corr: '+(s.corr_to_book||0).toFixed(2)+'</span>'+
       '</div>'+
-      '<div class="smart-rationale">'+s.rationale+'</div>'+
       '<button class="btn-add" onclick="addSmartTicker(\''+s.ticker+'\')">+ Add to portfolio</button>'+
       '</div>';
   }
+
   document.getElementById('smartComplements').innerHTML=(data.sharpe_enhancers||[]).map(cardHTML).join('');
   document.getElementById('smartDiversifiers').innerHTML=(data.vol_reducers||[]).map(cardHTML).join('');
   const panel=document.getElementById('smartPanel');
@@ -466,3 +576,4 @@ function addSmartTicker(t){
 
 loadDefault();
 window.addEventListener('load', initStars);
+window.addEventListener('load', updateRothDisplay);
