@@ -173,28 +173,7 @@ function setFreq(btn){
 function loadDefault(){ tickers=[...DEFAULT_TICKERS]; renderChips(); }
 function clearAll(){ tickers=[]; renderChips(); }
 
-function updateRothDisplay(){
-  const contribVal = +document.getElementById('biweekly').value || 0;
-  const rothVal    = +document.getElementById('rothBiweekly').value || 0;
-  const over50     = document.getElementById('over50Toggle')?.checked || false;
-  const freq       = FREQ[currentFreq];
-  const annualTotal  = freq.toAnnual(contribVal);
-  const rothAnnual   = freq.toAnnual(rothVal);
-  const roth3yr      = rothAnnual * 3;
-  const limit        = over50 ? 8000 : 7000;
-  const maxPerPeriod = limit / freq.periods;
-  const overLimit    = rothAnnual > limit;
-  const remaining    = Math.max(0, limit - rothAnnual);
-  document.getElementById('rothDisplay').innerHTML =
-    '<div class="roth-row"><span>Annual ' + freq.label + ' total</span><span>$' + annualTotal.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>' +
-    '<div class="roth-row"><span>Roth annual contribution</span><span style="color:' + (overLimit?'var(--red)':'var(--green)') + '">$' + rothAnnual.toLocaleString(undefined,{maximumFractionDigits:2}) + (overLimit?' ⚠ over limit':'') + '</span></div>' +
-    '<div class="roth-row"><span>2026 IRA limit (' + (over50?'50+':'under 50') + ')</span><span>$' + limit.toLocaleString() + '/yr</span></div>' +
-    '<div class="roth-row"><span>Max ' + freq.label.toLowerCase() + ' to hit limit</span><span style="color:var(--purple-mid)">$' + maxPerPeriod.toFixed(2) + '</span></div>' +
-    (remaining > 0 ? '<div class="roth-row"><span>Remaining annual allowance</span><span style="color:var(--green)">$' + remaining.toFixed(2) + '</span></div>' : '') +
-    '<div class="roth-row"><span>3yr total Roth deposits</span><span>$' + roth3yr.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span></div>';
-}
-document.getElementById('biweekly').addEventListener('input', updateRothDisplay);
-document.getElementById('rothBiweekly').addEventListener('input', updateRothDisplay);
+document.getElementById('biweekly').addEventListener('input', ()=>{});
 
 // ── Status ────────────────────────────────────────────────────────────────────
 function showStatus(msg,isErr=false){
@@ -441,12 +420,18 @@ function renderMonteCarlo(d){
 // ── Scenario summary cards ────────────────────────────────────────────────────
 function renderScenarios(d){
   const order=['bull','base','bear'];
+  const totalBiweekly3yr = d.biweekly * 26 * 3;
+  const totalInvested = d.capital + totalBiweekly3yr;
   document.getElementById('scenarioGrid').innerHTML=order.map(key=>{
     const s=d.scenarios[key];
+    const contribAdjRet=totalInvested>0?((s.totals.yr3-totalInvested)/totalInvested*100).toFixed(1):0;
+    const initOnlyRet=d.capital>0?((s.totals.yr3-d.capital)/d.capital*100).toFixed(1):0;
+    const adjColor=+contribAdjRet>=0?s.color:'var(--red)';
     return '<div class="scenario-card sc-'+key+'">'+
       '<div class="sc-label" style="color:'+s.color+'">'+s.label+'</div>'+
       '<div class="sc-total" style="color:'+s.color+'">$'+s.totals.yr3.toLocaleString()+'</div>'+
-      '<div class="sc-sub">'+(s.total_return_pct>0?'+':'')+s.total_return_pct+'% total return</div>'+
+      '<div class="sc-sub" style="color:'+adjColor+';opacity:1;font-weight:700">'+(+contribAdjRet>=0?'+':'')+contribAdjRet+'% on all capital deployed</div>'+
+      '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;font-family:\'DM Mono\',monospace">(+'+(+initOnlyRet>=0?'+':'')+initOnlyRet+'% on initial only)</div>'+
       '<div class="sc-rows">'+
       '<div class="sc-row"><span class="sc-row-lbl">Year 1</span><span style="color:'+s.color+';font-weight:800">$'+s.totals.yr1.toLocaleString()+'</span></div>'+
       '<div class="sc-row"><span class="sc-row-lbl">Year 2</span><span style="color:'+s.color+';font-weight:800">$'+s.totals.yr2.toLocaleString()+'</span></div>'+
@@ -672,4 +657,3 @@ function addSmartTicker(t){
 
 loadDefault();
 window.addEventListener('load', initStars);
-window.addEventListener('load', updateRothDisplay);
