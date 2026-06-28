@@ -316,3 +316,141 @@ def smart_suggestions(tickers: list, weights: list, data: dict) -> dict:
         warnings.append("No blue-chip defensive positions. WMT/JPM/JNJ reduce max drawdown in a risk-off selloff.")
     return {"complements":complements[:5],"diversifiers":diversifiers[:5],
             "warnings":warnings,"ai_weight_pct":round(ai_w*100,1)}
+
+
+# ── Enhanced smart suggestions with marginal impact ───────────────────────────
+def marginal_impact(existing_tickers, existing_weights, existing_data,
+                    candidate_ticker, candidate_data, add_pct=0.05, rf=0.045):
+    """
+    Compute the marginal Sharpe and vol impact of adding candidate_ticker
+    at add_pct weight, funded proportionally from existing positions.
+    Returns dict with sharpe_delta, vol_delta, corr_to_book.
+    """
+    try:
+        # Current portfolio
+        n = len(existing_tickers)
+        w_curr = np.array(existing_weights)
+        mu_curr = np.array([existing_data[t]['ann_ret'] for t in existing_tickers])
+        cov_curr = build_cov(existing_tickers, existing_data)
+        r0, v0, s0 = portfolio_stats(w_curr, mu_curr, cov_curr, rf)
+
+        # New portfolio with candidate added
+        new_tickers = existing_tickers + [candidate_ticker]
+        new_weights = np.append(w_curr * (1 - add_pct), add_pct)
+        new_weights /= new_weights.sum()
+
+        # Merge data
+        all_data = {**existing_data, candidate_ticker: candidate_data}
+        mu_new = np.array([all_data[t]['ann_ret'] for t in new_tickers])
+        cov_new = build_cov(new_tickers, all_data)
+        r1, v1, s1 = portfolio_stats(new_weights, mu_new, cov_new, rf)
+
+        # Correlation of candidate to existing book (weighted avg)
+        min_len = min(len(all_data[t]['returns']) for t in new_tickers)
+        M = np.array([np.array(all_data[t]['returns'])[:min_len] for t in new_tickers])
+        corr = np.corrcoef(M)
+        cand_idx = len(new_tickers) - 1
+        # Weighted avg correlation to existing
+        corr_to_book = float(np.average(corr[cand_idx, :-1], weights=w_curr))
+
+        return {
+            'sharpe_delta': round(s1 - s0, 3),
+            'vol_delta':    round((v1 - v0) * 100, 2),
+            'ret_delta':    round((r1 - r0) * 100, 2),
+            'corr_to_book': round(corr_to_book, 3),
+            'new_sharpe':   round(s1, 3),
+            'new_vol':      round(v1 * 100, 1),
+            'new_ret':      round(r1 * 100, 1),
+        }
+    except Exception as e:
+        return {
+            'sharpe_delta': 0, 'vol_delta': 0, 'ret_delta': 0,
+            'corr_to_book': 0, 'new_sharpe': 0, 'new_vol': 0, 'new_ret': 0,
+        }
+
+
+def smart_suggestions_v2(tickers, weights, data):
+    """
+    Enhanced smart suggestions with marginal portfolio impact per candidate.
+    Returns sharpe_enhancers and vol_reducers sorted by impact.
+    """
+    existing = {t.upper() for t in tickers}
+    w_arr = np.array(weights)
+
+    # Gather all candidates
+    all_candidates = []
+    for cluster in ['AI_OPTICAL','AI_POWER','AI_NETWORK','AI_COMPUTE',
+                    'ENERGY_TRANS','BLUECHIP','GROWTH_DIV']:
+        for (t, desc, sec, ret, vol) in SMART_DB[cluster]:
+            if t not in existing:
+                all_candidates.append({
+                    'ticker': t, 'desc': desc, 'sector': sec,
+                    'exp_return': ret, 'ann_vol': vol,
+                    'type': 'complement' if cluster not in ['BLUECHIP','GROWTH_DIV'] else 'diversifier'
+                })
+
+    # Build simulated data for each candidate
+    results = []
+    for cand in all_candidates:
+        t = cand['ticker']
+        cand_data = {
+            'returns': _simulated_returns(t).tolist(),
+            'ann_ret': cand['exp_return'],
+            'ann_vol': cand['ann_vol'],
+            'price': TICKER_PRIORS.get(t, DEFAULT_PRIOR)[2],
+            'sharpe': round((cand['exp_return'] - 0.045) / cand['ann_vol'], 3)
+        }
+        if data and all(t in data for t in tickers):
+            impact = marginal_impact(tickers, weights, data, t, cand_data)
+        else:
+            # Fallback: estimate from vol/corr priors
+            impact = {
+                'sharpe_delta': round((cand['exp_return'] - 0.045) / cand['ann_vol'] * 0.05, 3),
+                'vol_delta': round((cand['ann_vol'] - 0.50) * -2, 2),
+                'ret_delta': round(cand['exp_return'] * 0.05 * 100, 2),
+                'corr_to_book': 0.3 if cand['type'] == 'complement' else 0.1,
+                'new_sharpe': 0, 'new_vol': 0, 'new_ret': 0,
+            }
+        results.append({**cand, **impact})
+
+    # Sort: sharpe enhancers by sharpe_delta desc
+    sharpe_enhancers = sorted(
+        [r for r in results if r['type'] == 'complement'],
+        key=lambda x: -x['sharpe_delta']
+    )[:5]
+
+    # Sort: vol reducers by lowest corr_to_book + lowest vol
+    vol_reducers = sorted(
+        [r for r in results if r['type'] == 'diversifier'],
+        key=lambda x: (x['corr_to_book'], x['ann_vol'])
+    )[:5]
+
+    # Sector exposure breakdown
+    ai_w  = sum(w for t,w in zip(tickers,weights)
+                if any(t.upper()==db_t for cl in ['AI_COMPUTE','AI_OPTICAL','AI_NETWORK']
+                       for db_t,*_ in SMART_DB[cl]))
+    pwr_w = sum(w for t,w in zip(tickers,weights)
+                if any(t.upper()==db_t for db_t,*_ in SMART_DB['AI_POWER']))
+    def_w = sum(w for t,w in zip(tickers,weights)
+                if any(t.upper()==db_t for db_t,*_ in SMART_DB['BLUECHIP']))
+    oth_w = max(0, 1 - ai_w - pwr_w - def_w)
+
+    warnings = []
+    if ai_w > 0.60:
+        warnings.append(f'High AI concentration ({ai_w*100:.0f}%). A single risk-off AI drawdown hits the majority of your book simultaneously.')
+    if pwr_w < 0.10:
+        warnings.append('Low power & energy exposure. AI data-center electricity demand is a structural multi-year tailwind.')
+    if def_w == 0:
+        warnings.append('No blue-chip defensive positions. Consider adding 5-10% to reduce max drawdown depth.')
+
+    return {
+        'sharpe_enhancers': sharpe_enhancers,
+        'vol_reducers':     vol_reducers,
+        'warnings':         warnings,
+        'exposure': {
+            'ai':    round(ai_w*100, 1),
+            'power': round(pwr_w*100, 1),
+            'defensive': round(def_w*100, 1),
+            'other': round(oth_w*100, 1),
+        }
+    }
