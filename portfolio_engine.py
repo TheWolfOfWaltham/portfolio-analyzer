@@ -275,10 +275,14 @@ def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, da
             vi    = [alloc * (1 + ann_r) ** yr for yr in [1, 2, 3]]
             pmt   = biweekly_contrib * w
             fv    = [_fv_annuity(pmt, ann_r, 26, yr) for yr in [1, 2, 3]]
+            yr3_val = vi[2]+fv[2]
+            total_return_pct = round((yr3_val - alloc) / alloc * 100, 1) if alloc > 0 else 0
             rows.append({"ticker":t,"weight":round(w*100,1),"init":round(alloc,0),
-                         "mult_3yr":round(m3,2),"ann_r":round(ann_r*100,1),
+                         "biweekly":round(pmt,2),
+                         "ann_r":round(ann_r*100,1),
                          "yr1":round(vi[0]+fv[0],0),"yr2":round(vi[1]+fv[1],0),
-                         "yr3":round(vi[2]+fv[2],0)})
+                         "yr3":round(yr3_val,0),
+                         "total_return_pct":total_return_pct})
             for i, yr in enumerate(["yr1","yr2","yr3"]):
                 tots[yr] += vi[i]+fv[i]
                 tots[f"{yr}_init"]    += vi[i]
