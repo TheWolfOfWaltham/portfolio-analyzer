@@ -57,7 +57,7 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .field-input-styled:focus{border-color:var(--purple)}
 .ticker-row{display:flex;gap:6px;flex-wrap:wrap;background:var(--bg-deep);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-height:46px;align-items:center;cursor:text;transition:border-color .15s}
 .ticker-row:focus-within{border-color:var(--purple)}
-.ticker-chip{display:inline-flex;align-items:center;gap:5px;border-radius:7px;padding:5px 12px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;border:1px solid rgba(255,255,255,0.22);box-shadow:0 0 0 0.5px rgba(255,255,255,0.06)}
+.ticker-chip{display:inline-flex;align-items:center;gap:5px;border-radius:7px;padding:5px 12px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;border:none;background:#000}
 .ticker-chip button{background:none;border:none;cursor:pointer;font-size:11px;opacity:.55;line-height:1;padding:0;color:inherit}
 .ticker-chip button:hover{opacity:1}
 .ticker-input-field{border:none;outline:none;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;background:transparent;color:var(--text);min-width:80px;flex:1;padding:2px 4px}
@@ -102,11 +102,11 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .chart-card h3{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px}
 
 /* STACKED HISTOGRAM */
-.stacked-bar{display:flex;width:100%;height:72px;border-radius:10px;overflow:hidden;gap:2px;border:1px solid rgba(255,255,255,0.12)}
-.seg{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;border-right:1px solid rgba(255,255,255,0.10)}
-.seg:last-child{border-right:none}
-.seg-pct{font-size:13px;font-weight:800;color:#fff;line-height:1}
-.seg-ticker{font-size:9px;font-weight:700;color:rgba(255,255,255,.6)}
+.stacked-bar{display:flex;width:100%;height:72px;border-radius:10px;overflow:hidden;gap:3px;background:#000}
+.seg{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;background:#000;position:relative}
+.seg:last-child{}
+.seg-pct{font-size:13px;font-weight:800;color:#fff;line-height:1;position:relative;z-index:1}
+.seg-ticker{font-size:9px;font-weight:700;color:rgba(255,255,255,.75);position:relative;z-index:1}
 .seg-sm .seg-pct{font-size:10px}
 .legend-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
 .legend-item{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--text-muted)}
@@ -115,11 +115,11 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 /* EXPOSURE BARS */
 .exposure-wrap{display:flex;flex-direction:column;gap:14px}
 .exposure-macro{margin-bottom:6px}
-.exposure-macro-bar{display:flex;height:52px;border-radius:10px;overflow:hidden;gap:2px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.12)}
-.exp-seg{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px;border-right:1px solid rgba(255,255,255,0.10)}
-.exp-seg:last-child{border-right:none}
-.exp-seg-label{font-size:11px;font-weight:800;color:#fff;line-height:1}
-.exp-seg-pct{font-size:10px;font-weight:700;color:rgba(255,255,255,.65)}
+.exposure-macro-bar{display:flex;height:52px;border-radius:10px;overflow:hidden;gap:3px;margin-bottom:8px;background:#000}
+.exp-seg{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px;background:#000;position:relative}
+.exp-seg:last-child{}
+.exp-seg-label{font-size:11px;font-weight:800;color:#fff;line-height:1;position:relative;z-index:1}
+.exp-seg-pct{font-size:10px;font-weight:700;color:rgba(255,255,255,.7);position:relative;z-index:1}
 .exposure-sub-label{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
 .sub-bars{display:flex;flex-direction:column;gap:5px}
 .sub-bar-row{display:flex;align-items:center;gap:10px}
@@ -179,7 +179,13 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .impact-neu{background:rgba(107,58,255,.12);color:var(--purple-mid);border:1px solid rgba(107,58,255,.2)}
 .smart-rationale{font-size:10px;color:var(--purple-mid);font-style:italic;margin-bottom:8px}
 .btn-add{background:var(--purple);color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Space Grotesk',sans-serif}
-.warning-item{background:#1a1200;border:1px solid rgba(251,191,36,.2);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--amber);margin-bottom:6px;font-weight:600}
+.risk-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px 24px}
+.risk-panel-title{font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.12em;margin-bottom:14px}
+.risk-item{margin-bottom:12px;padding-bottom:12px;border-bottom:0.5px solid rgba(255,255,255,0.06)}
+.risk-item:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.risk-item-header{font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:800;color:#fff;margin-bottom:3px}
+.risk-item-body{font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);line-height:1.5}
+.warning-item{display:none}
 
 #results{display:none}
 #results.visible{display:block}
@@ -273,6 +279,12 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
           <div class="field-label">Roth IRA Biweekly ($)</div>
           <input type="number" id="rothBiweekly" class="field-input-styled" value="358.33" step="0.01"/>
         </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:-8px;margin-bottom:4px">
+          <label style="font-size:11px;font-weight:600;color:var(--text-dim);display:flex;align-items:center;gap:7px;cursor:pointer">
+            <input type="checkbox" id="over50Toggle" onchange="updateRothDisplay()" style="accent-color:var(--purple);width:14px;height:14px"/>
+            Age 50+ (higher IRA limit)
+          </label>
+        </div>
         <div id="rothDisplay" class="roth-display"></div>
       </div>
     </div>
@@ -288,6 +300,8 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
     <div class="spinner"></div>
     <span id="statusMsg">Fetching live market data…</span>
   </div>
+
+  <div id="riskPanel" style="display:none;margin-bottom:20px"></div>
 
   <div class="smart-panel" id="smartPanel">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:8px">
