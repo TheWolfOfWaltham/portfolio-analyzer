@@ -128,7 +128,8 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 
 /* POSITION TABLE */
 .pos-table{width:100%;border-collapse:collapse;font-size:12px}
-.pos-table th{text-align:left;padding:8px 10px;font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border)}
+.pos-table th{text-align:left;padding:8px 10px;font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);cursor:pointer;user-select:none;white-space:nowrap}
+.pos-table th:hover{color:var(--purple-mid)}
 .pos-table td{padding:10px 10px;border-bottom:1px solid rgba(42,32,64,.5)}
 .pos-table tr:last-child td{border-bottom:none}
 .pos-table tr:hover td{background:rgba(107,58,255,.04)}
@@ -306,19 +307,6 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
     </div>
 
     <div class="section">
-      <div class="section-title">Position Breakdown</div>
-      <div class="chart-card" style="padding:0;overflow:hidden">
-        <table class="pos-table">
-          <thead><tr>
-            <th>Ticker</th><th>Sector</th><th>Weight</th><th>$ Amount</th>
-            <th>Exp. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Risk Contrib.</th>
-          </tr></thead>
-          <tbody id="posBody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="section">
       <div class="section-title">Quantitative Risk Analysis</div>
       <div class="charts-2">
         <div class="chart-card"><h3>Efficient Frontier</h3><div style="position:relative;height:280px"><canvas id="frontierChart"></canvas></div></div>
@@ -329,6 +317,13 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
     <div class="section">
       <div class="section-title">3-Year Scenario Analysis — Bull → Base → Bear</div>
       <div class="scenario-grid" id="scenarioGrid"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Position Breakdown — click headers to sort</div>
+      <div class="chart-card" style="padding:0;overflow:hidden">
+        <table class="pos-table" id="posTable"></table>
+      </div>
     </div>
 
     <div class="section">
