@@ -209,9 +209,15 @@ async function runAnalysis(){
 
 function destroyChart(id){ if(chartInstances[id]){ chartInstances[id].destroy(); delete chartInstances[id]; } }
 
+let lastCovMatrix = null;
+let lastBetas = {};
+
 function renderAll(d){
   document.getElementById('dataNote').textContent=d.data_note||'';
   lastPositionData=d;
+  lastCovMatrix = d.cov_matrix||null;
+  lastBetas = {};
+  (d.positions||[]).forEach(p=>{ lastBetas[p.ticker]=p.beta||1.0; });
   renderHeroBubbles(d);
   renderKPIs(d); renderRiskPanel(d); renderStackedBar(d); renderExposure(d);
   renderFrontier(d); renderMonteCarlo(d);
@@ -453,9 +459,10 @@ function renderPositionTable(d){
   const thS='cursor:pointer;user-select:none;white-space:nowrap';
   const hdrs=[
     {k:'ticker',l:'Ticker'},{k:'weight',l:'Weight'},
-    {k:'beta',l:'β Beta'},{k:'ann_ret',l:'CAPM Return'},
-    {k:'ann_vol',l:'Ann. Vol'},{k:'sharpe',l:'Sharpe'},{k:'rc_pct',l:'Risk Contrib.'}
-  ].map(h=>'<th style="'+thS+'" onclick="sortTable(\''+h.k+'\')">'+h.l+arrow(h.k)+'</th>').join('');
+    {k:'beta',l:'β Beta'},{k:'blended_return',l:'Exp. Return (blend)'},
+    {k:'ann_vol',l:'Ann. Vol'},{k:'sharpe',l:'Sharpe'},{k:'rc_pct',l:'Risk Contrib.'},
+    {k:'',l:'Your Estimate'}
+  ].map(h=>'<th style="'+thS+(h.k?'" onclick="sortTable(\''+h.k+'\')':'')+'">'+(h.k?h.l+arrow(h.k):h.l)+'</th>').join('');
 
   const rows=positions.map((p,i)=>{
     const glow=glowFor(p.ticker);
@@ -463,15 +470,23 @@ function renderPositionTable(d){
     const rcClass=p.rc_pct>25?'tag-high':p.rc_pct>12?'tag-med':'tag-low';
     const isLive=p.data_source&&!p.data_source.includes('PRIOR');
     const srcBadge=isLive?'<span class="source-badge source-live">live</span>':'<span class="source-badge source-prior">prior</span>';
+    const hasFMP=p.analyst_target&&p.analyst_implied!==null&&p.analyst_implied!==undefined;
+    const blendLabel=hasFMP
+      ?'<span style="font-size:9px;color:var(--purple-mid);font-weight:600">70% analyst / 30% CAPM</span>'
+      :'<span style="font-size:9px;color:var(--text-faint);font-weight:600">CAPM only</span>';
+    const analystNote=hasFMP
+      ?'<div style="font-size:9px;color:var(--text-dim);font-family:\'DM Mono\',monospace">target $'+(p.analyst_target||0).toFixed(2)+' → '+p.analyst_implied+'%</div>':'';
+    const blended=p.blended_return||p.ann_ret||0;
     return '<tr>'+
       '<td><span style="color:#fff;background:#000;padding:3px 10px;border-radius:5px;display:inline-block;box-shadow:0 0 10px 2px '+glow+',0 0 20px 4px '+glow.replace(/[\d.]+\)$/,'0.18)')+';font-family:\'Space Grotesk\',sans-serif;font-size:12px;font-weight:800">'+p.ticker+'</span>'+
       '<div style="font-size:9px;color:var(--text-dim);margin-top:2px;display:flex;align-items:center;gap:4px">'+sec+' '+srcBadge+'</div></td>'+
       '<td style="font-weight:800">'+p.weight+'%</td>'+
       '<td style="font-family:\'DM Mono\',monospace;color:var(--blue)">'+(p.beta||1).toFixed(2)+'</td>'+
-      '<td style="font-weight:700;color:var(--purple-mid)">+'+(p.capm_return||p.ann_ret).toFixed(1)+'%</td>'+
+      '<td><span style="font-weight:800;color:var(--purple-mid)">+'+blended.toFixed(1)+'%</span>'+blendLabel+analystNote+'</td>'+
       '<td style="font-family:\'DM Mono\',monospace">'+p.ann_vol+'%</td>'+
       '<td style="font-weight:700">'+p.sharpe+'</td>'+
       '<td><span class="tag '+rcClass+'">'+p.rc_pct+'%</span></td>'+
+      '<td><input type="number" class="ret-override-input" data-ticker="'+p.ticker+'" data-original="'+blended.toFixed(1)+'" value="'+blended.toFixed(1)+'" step="0.5" min="-50" max="200" onchange="markOverride(this)" style="width:70px;background:#0d0d13;border:1px solid #2a2040;border-radius:5px;padding:4px 6px;font-family:\'DM Mono\',monospace;font-size:11px;color:#e8e6f0;text-align:right"/><span style="font-size:9px;color:var(--text-faint);margin-left:3px">%</span></td>'+
       '</tr>';
   }).join('');
 
@@ -837,6 +852,54 @@ function toggleSmartPanel(){
     if(txt) txt.textContent = 'Show suggestions';
   }
   smartVisible = !smartVisible;
+}
+
+
+// ── Return override + recalculate ─────────────────────────────────────────────
+function markOverride(input){
+  const original = parseFloat(input.dataset.original);
+  const current  = parseFloat(input.value);
+  input.style.borderColor = Math.abs(current-original)>0.01 ? 'var(--purple)' : '#2a2040';
+}
+
+async function runRecalculate(){
+  if(!lastPositionData||!lastCovMatrix){ showStatus('Run Analyze first.',true); return; }
+  const inputs = document.querySelectorAll('.ret-override-input');
+  const overrides = {};
+  inputs.forEach(inp=>{ overrides[inp.dataset.ticker]=parseFloat(inp.value)||10; });
+
+  showStatus('Recalculating with your return estimates…');
+  document.getElementById('recalcBtn').disabled=true;
+  try{
+    const res=await fetch('/api/recalculate',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        tickers: lastPositionData.tickers,
+        returns: overrides,
+        cov_matrix: lastCovMatrix,
+        betas: lastBetas,
+        capital: +document.getElementById('capital').value,
+        biweekly: +document.getElementById('biweekly').value,
+        mode: currentMode,
+      })
+    });
+    const data=await res.json();
+    if(data.error){ showStatus(data.error,true); return; }
+    hideStatus();
+    // Merge updated portfolio stats back into lastPositionData for re-renders
+    const merged={...lastPositionData, portfolio:data.portfolio,
+      frontier:data.frontier, mc_paths:data.mc_paths,
+      scenarios:data.scenarios, weights:data.weights};
+    renderKPIs(merged); renderHeroBubbles(merged);
+    renderFrontier(merged); renderMonteCarlo(merged); renderScenarios(merged);
+    renderScenarioTables(merged);
+    // Flash the KPI strip to indicate update
+    const strip=document.getElementById('kpiStrip');
+    strip.style.transition='opacity 0.2s';
+    strip.style.opacity='0.4';
+    setTimeout(()=>strip.style.opacity='1',300);
+  } catch(e){ showStatus('Recalculate error: '+e.message,true); }
+  finally{ document.getElementById('recalcBtn').disabled=false; }
 }
 
 loadDefault();
