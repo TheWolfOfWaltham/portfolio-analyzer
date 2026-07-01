@@ -212,6 +212,7 @@ function destroyChart(id){ if(chartInstances[id]){ chartInstances[id].destroy();
 function renderAll(d){
   document.getElementById('dataNote').textContent=d.data_note||'';
   lastPositionData=d;
+  renderHeroBubbles(d);
   renderKPIs(d); renderRiskPanel(d); renderStackedBar(d); renderExposure(d);
   renderFrontier(d); renderMonteCarlo(d);
   renderScenarios(d); renderPositionTable(d); renderScenarioTables(d);
@@ -452,21 +453,22 @@ function renderPositionTable(d){
   const thS='cursor:pointer;user-select:none;white-space:nowrap';
   const hdrs=[
     {k:'ticker',l:'Ticker'},{k:'weight',l:'Weight'},
-    {k:'ann_ret',l:'Exp. Return'},{k:'ann_vol',l:'Ann. Vol'},
-    {k:'sharpe',l:'Sharpe'},{k:'rc_pct',l:'Risk Contrib.'}
+    {k:'beta',l:'β Beta'},{k:'ann_ret',l:'CAPM Return'},
+    {k:'ann_vol',l:'Ann. Vol'},{k:'sharpe',l:'Sharpe'},{k:'rc_pct',l:'Risk Contrib.'}
   ].map(h=>'<th style="'+thS+'" onclick="sortTable(\''+h.k+'\')">'+h.l+arrow(h.k)+'</th>').join('');
 
   const rows=positions.map((p,i)=>{
-    const col=tickerColor(p.ticker,i);
-    const sec=d.sectors[p.ticker]?d.sectors[p.ticker].sector:'Other';
     const glow=glowFor(p.ticker);
+    const sec=d.sectors[p.ticker]?d.sectors[p.ticker].sector:'Other';
     const rcClass=p.rc_pct>25?'tag-high':p.rc_pct>12?'tag-med':'tag-low';
-    const retColor=p.ann_ret>=0?'var(--green)':'var(--red)';
+    const isLive=p.data_source&&!p.data_source.includes('PRIOR');
+    const srcBadge=isLive?'<span class="source-badge source-live">live</span>':'<span class="source-badge source-prior">prior</span>';
     return '<tr>'+
       '<td><span style="color:#fff;background:#000;padding:3px 10px;border-radius:5px;display:inline-block;box-shadow:0 0 10px 2px '+glow+',0 0 20px 4px '+glow.replace(/[\d.]+\)$/,'0.18)')+';font-family:\'Space Grotesk\',sans-serif;font-size:12px;font-weight:800">'+p.ticker+'</span>'+
-      '<div style="font-size:10px;color:var(--text-dim);font-weight:500;margin-top:3px">'+sec+'</div></td>'+
+      '<div style="font-size:9px;color:var(--text-dim);margin-top:2px;display:flex;align-items:center;gap:4px">'+sec+' '+srcBadge+'</div></td>'+
       '<td style="font-weight:800">'+p.weight+'%</td>'+
-      '<td style="font-weight:700;color:'+retColor+'">'+(p.ann_ret>=0?'+':'')+p.ann_ret+'%</td>'+
+      '<td style="font-family:\'DM Mono\',monospace;color:var(--blue)">'+(p.beta||1).toFixed(2)+'</td>'+
+      '<td style="font-weight:700;color:var(--purple-mid)">+'+(p.capm_return||p.ann_ret).toFixed(1)+'%</td>'+
       '<td style="font-family:\'DM Mono\',monospace">'+p.ann_vol+'%</td>'+
       '<td style="font-weight:700">'+p.sharpe+'</td>'+
       '<td><span class="tag '+rcClass+'">'+p.rc_pct+'%</span></td>'+
@@ -648,6 +650,10 @@ function renderSmart(data){
   document.getElementById('smartDiversifiers').innerHTML=(data.vol_reducers||[]).map(cardHTML).join('');
   const panel=document.getElementById('smartPanel');
   panel.className='smart-panel visible';
+  panel.style.overflow='hidden';
+  panel.style.maxHeight='5000px';
+  smartVisible=true;
+  document.getElementById('starWrap').style.display='flex';
   panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
@@ -655,5 +661,177 @@ function addSmartTicker(t){
   if(!tickers.includes(t)){ tickers.push(t); renderChips(); }
 }
 
+// ── Nasdaq banner ─────────────────────────────────────────────────────────────
+const COMPANY_DOMAINS = {
+  AAPL:'apple.com',MSFT:'microsoft.com',NVDA:'nvidia.com',AMZN:'amazon.com',
+  GOOG:'google.com',META:'meta.com',TSLA:'tesla.com',AVGO:'broadcom.com',
+  NFLX:'netflix.com',COST:'costco.com',AMD:'amd.com',QCOM:'qualcomm.com',
+  ADBE:'adobe.com',TXN:'ti.com',AMGN:'amgen.com',CSCO:'cisco.com',
+  SBUX:'starbucks.com',GILD:'gilead.com',PANW:'paloaltonetworks.com',
+  LRCX:'lamresearch.com',AMAT:'appliedmaterials.com',KLAC:'kla.com',
+  REGN:'regeneron.com',ADP:'adp.com',BKNG:'booking.com',MRVL:'marvell.com',
+  CRWD:'crowdstrike.com',DDOG:'datadoghq.com',TEAM:'atlassian.com',
+  ZS:'zscaler.com',WDAY:'workday.com',ABNB:'airbnb.com',FTNT:'fortinet.com',
+  CDNS:'cadence.com',SNPS:'synopsys.com',ORLY:'oreillyauto.com',
+  CTAS:'cintas.com',PCAR:'paccar.com',MNST:'monsterenergy.com',EA:'ea.com',
+  BIIB:'biogen.com',IDXX:'idexx.com',ANSS:'ansys.com',HON:'honeywell.com',
+  PEP:'pepsico.com',INTC:'intel.com',MDLZ:'mondelezinternational.com',
+  ADI:'analog.com',VRTX:'vrtx.com',FISV:'fiserv.com',
+};
+
+function initNasdaqBanner(){
+  fetch('/api/market-data').then(r=>r.json()).then(data=>{
+    const items = data.tickers||[];
+    if(!items.length) return;
+    const track = document.getElementById('nasdaqTrack');
+    track.innerHTML = '';
+    // Build two copies for seamless loop
+    for(let copy=0;copy<2;copy++){
+      items.forEach(item=>{
+        const domain = COMPANY_DOMAINS[item.ticker]||'';
+        const pos    = item.change >= 0;
+        const el = document.createElement('div');
+        el.className = 'nasdaq-item';
+        el.innerHTML =
+          (domain?`<img class="nasdaq-logo" src="https://logo.clearbit.com/${domain}" onerror="this.style.display='none'" loading="lazy"/>`:'') +
+          `<span class="nasdaq-ticker">${item.ticker}</span>` +
+          `<span class="nasdaq-price">$${item.price.toFixed(2)}</span>` +
+          `<span class="nasdaq-chg ${pos?'pos':'neg'}">${pos?'▲':'▼'}${Math.abs(item.change).toFixed(2)}%</span>`;
+        track.appendChild(el);
+      });
+    }
+    // Animate with GSAP if available, else CSS
+    const totalW = track.scrollWidth / 2;
+    if(window.gsap){
+      gsap.to(track, {x:-totalW, duration:totalW/50, ease:'none', repeat:-1, modifiers:{
+        x: gsap.utils.wrap(-totalW, 0)
+      }});
+    } else {
+      let pos2 = 0;
+      function scroll(){ pos2 -= 0.5; if(pos2 <= -totalW) pos2=0; track.style.transform=`translateX(${pos2}px)`; requestAnimationFrame(scroll); }
+      requestAnimationFrame(scroll);
+    }
+  }).catch(()=>{});
+}
+
+// ── Hero bubbles ──────────────────────────────────────────────────────────────
+function renderHeroBubbles(d){
+  const capital   = d.capital||10000;
+  const biweekly  = d.biweekly||500;
+  const totalDCA  = biweekly * 26 * 3;
+  const totalIn   = capital + totalDCA;
+  const baseYr3   = d.scenarios?.base?.totals?.yr3 || 0;
+  const baseAdj   = totalIn>0?((baseYr3-totalIn)/totalIn*100).toFixed(1):0;
+
+  const bubbles = document.getElementById('heroBubbles');
+  bubbles.style.display = 'grid';
+  bubbles.innerHTML =
+    // 1. Total capital deployed
+    '<div class="hero-bubble">' +
+      '<div class="hb-label">Total Capital Deployed — 3yr</div>' +
+      '<div class="hb-val" style="color:var(--purple-mid)">$'+totalIn.toLocaleString()+'</div>' +
+      '<div class="hb-sub">$'+capital.toLocaleString()+' initial + $'+Math.round(totalDCA).toLocaleString()+' DCA</div>' +
+    '</div>' +
+    // 2. Base case future value
+    '<div class="hero-bubble">' +
+      '<div class="hb-label">Base Case — 3yr Portfolio Value</div>' +
+      '<div class="hb-val" style="color:var(--blue)">$'+baseYr3.toLocaleString()+'</div>' +
+      '<div class="hb-sub">'+( +baseAdj>=0?'+':'')+baseAdj+'% on all capital deployed</div>' +
+    '</div>' +
+    // 3. Treemap
+    '<div class="hero-bubble">' +
+      '<div class="hb-label">Portfolio Weights</div>' +
+      '<div id="treemapContainer" class="treemap"></div>' +
+    '</div>';
+
+  // Build treemap
+  renderTreemap(d.positions);
+}
+
+function renderTreemap(positions){
+  const wrap = document.getElementById('treemapContainer');
+  if(!wrap||!positions) return;
+  const sorted = [...positions].sort((a,b)=>b.weight-a.weight);
+  const total  = sorted.reduce((s,p)=>s+p.weight,0);
+  wrap.innerHTML = '';
+  // Simple row-based layout
+  let remaining = [...sorted];
+  let totalH = wrap.offsetHeight || 180;
+  let totalW = wrap.offsetWidth  || 300;
+  let yOff = 0;
+  while(remaining.length > 0){
+    const rowW = remaining.reduce((s,p)=>s+p.weight,0)/total*totalH;
+    // Decide how many go in this row (aspect ratio heuristic)
+    let rowItems = [], rowWeight = 0;
+    for(let i=0;i<remaining.length;i++){
+      const candidate = [...rowItems, remaining[i]];
+      const cw = candidate.reduce((s,p)=>s+p.weight,0)/total*totalH;
+      const minW = Math.min(...candidate.map(p=>p.weight/total*totalH/cw*totalW));
+      if(candidate.length > 1 && minW < 28 && rowItems.length > 0) break;
+      rowItems.push(remaining[i]);
+      rowWeight += remaining[i].weight;
+    }
+    remaining = remaining.slice(rowItems.length);
+    const rowH = rowWeight / total * totalH;
+    rowItems.forEach(p=>{
+      const segW = p.weight / rowWeight * totalW;
+      const glow = glowFor(p.ticker);
+      const div  = document.createElement('div');
+      div.className = 'tm-seg';
+      div.style.cssText = 'width:'+segW.toFixed(1)+'px;height:'+rowH.toFixed(1)+'px;' +
+        'border:1.5px solid '+tickerColor(p.ticker,0)+';' +
+        'box-shadow:0 0 10px 2px '+glow+',inset 0 0 8px '+glow.replace(/[\d.]+\)$/,'0.1)')+';';
+      if(segW > 24 && rowH > 24){
+        div.innerHTML = '<span class="tm-ticker">'+p.ticker+'</span><span class="tm-pct">'+p.weight+'%</span>';
+      }
+      wrap.appendChild(div);
+    });
+    yOff += rowH;
+    if(remaining.length===0) break;
+    totalH -= rowH;
+    if(totalH < 10) break;
+  }
+}
+
+// ── Star hide button (GSAP) ───────────────────────────────────────────────────
+let smartVisible = false;
+function initStarBtn(){
+  const btn = document.getElementById('starBtn');
+  if(!btn||!window.gsap) return;
+  btn.addEventListener('mouseenter',()=>{
+    gsap.to('#starSvg', {rotation:360, duration:0.5, ease:'back.out(1.4)', overwrite:true});
+    gsap.to('#starSvg path', {fill:'#6b3aff', stroke:'#c084ff', duration:0.3});
+  });
+  btn.addEventListener('mouseleave',()=>{
+    gsap.to('#starSvg path', {fill:'#2d1b69', stroke:'#6b3aff', duration:0.3});
+  });
+}
+
+function toggleSmartPanel(){
+  const panel  = document.getElementById('smartPanel');
+  const risk   = document.getElementById('riskPanel');
+  const wrap   = document.getElementById('starWrap');
+  const txt    = document.querySelector('.star-text');
+  if(!window.gsap||!panel) return;
+
+  if(smartVisible){
+    // Show
+    gsap.to([panel,risk], {maxHeight:2000, opacity:1, duration:0.8,
+      ease:'power2.inOut', display:'block'});
+    if(txt) txt.textContent = 'Hide suggestions';
+  } else {
+    // Hide — blind close effect
+    gsap.to([panel,risk], {maxHeight:0, opacity:0, duration:0.8,
+      ease:'power2.inOut', onComplete:()=>{
+        panel.style.display='none';
+        if(risk) risk.style.display='none';
+      }});
+    if(txt) txt.textContent = 'Show suggestions';
+  }
+  smartVisible = !smartVisible;
+}
+
 loadDefault();
 window.addEventListener('load', initStars);
+window.addEventListener('load', initNasdaqBanner);
+window.addEventListener('load', initStarBtn);
