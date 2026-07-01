@@ -4,15 +4,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from portfolio_engine import (fetch_returns, build_cov, optimize, efficient_frontier,
                                monte_carlo, risk_contributions, portfolio_stats,
                                scenario_projections, smart_suggestions_v2,
-                               marginal_impact, _simulated_returns, TICKER_PRIORS,
-                               DEFAULT_PRIOR)
+                               marginal_impact, _simulated_returns, _fetch_alpaca,
+                               TICKER_PRIORS, DEFAULT_PRIOR, RF, ERP)
 from dotenv import load_dotenv
 import numpy as np
 
 load_dotenv()
 api_bp = Blueprint('api', __name__)
 
-# ── Colour / sector maps ──────────────────────────────────────────────────────
+ANTHROPIC_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
+ANTHROPIC_BASE = 'https://api.anthropic.com/v1/messages'
+
+# ── Sector / colour maps ──────────────────────────────────────────────────────
 SECTOR_MAP = {
     'GLW':'AI Infra Optical','SNDK':'Semiconductors','NBIS':'AI Cloud Infra',
     'GEV':'Power Infra','MRVL':'Custom ASIC','COHR':'Optical Transceivers',
@@ -69,27 +72,18 @@ def _exposure(tickers, weights, sectors):
         'sub_colors':   {s: SECTOR_COLORS.get(s,'#131313') for s in sub},
     }
 
-# ── Claude smart suggestions ──────────────────────────────────────────────────
-ANTHROPIC_KEY  = os.environ.get('ANTHROPIC_API_KEY', '')
-ANTHROPIC_BASE = 'https://api.anthropic.com/v1/messages'
 
+# ── Claude smart suggestions ──────────────────────────────────────────────────
 def _call_claude(tickers, weights, sectors, exposure, user_prompt=''):
-    """
-    Call Claude claude-sonnet-4-6 to generate stock suggestions.
-    Returns parsed dict or None on failure.
-    """
     if not ANTHROPIC_KEY:
         return None
-
-    weighted = ', '.join(f"{t} ({w*100:.1f}%)" for t,w in zip(tickers,weights))
+    weighted  = ', '.join(f"{t} ({w*100:.1f}%)" for t,w in zip(tickers,weights))
     macro_str = ', '.join(f"{k}: {v}%" for k,v in (exposure.get('macro',{}) or {}).items())
     existing  = ', '.join(tickers)
-    constraint = user_prompt.strip() or (
-        "Suggest stocks that complement this AI infrastructure portfolio. "
-        "Prioritise high Sharpe ratio picks and uncorrelated diversifiers."
-    )
+    constraint = user_prompt.strip() or \
+        "Suggest stocks that complement this AI infrastructure portfolio with best risk-adjusted returns."
 
-    prompt = f"""You are an expert quantitative portfolio analyst with deep knowledge of US equity markets.
+    prompt = f"""You are an expert quantitative portfolio analyst.
 
 CURRENT PORTFOLIO:
 Holdings: {weighted}
@@ -98,117 +92,69 @@ Theme: AI Infrastructure, Power & Energy, Enterprise Software
 
 USER REQUEST: {constraint}
 
-TASK: Suggest exactly 5 Sharpe Enhancers and exactly 5 Volatility Reducers.
-- Sharpe Enhancers: stocks with strong risk-adjusted return that complement or extend the portfolio theme
-- Vol Reducers: low-beta, low-correlation, defensive stocks that reduce drawdown risk
-- DO NOT suggest any of these existing holdings: {existing}
-- All tickers must be valid NYSE/NASDAQ-listed US stock symbols
-- Use realistic forward-looking estimates based on fundamentals and market position
+TASK: Suggest exactly 5 Sharpe Enhancers and 5 Volatility Reducers.
+DO NOT suggest any of: {existing}
+All tickers must be valid NYSE/NASDAQ US symbols.
 
-Return ONLY valid JSON with no markdown fences, no explanation outside the JSON:
-{{
-  "portfolio_analysis": "One concise sentence on the portfolio's key strength and main risk.",
-  "sharpe_enhancers": [
-    {{
-      "ticker": "NVDA",
-      "company": "NVIDIA Corporation",
-      "sector": "Semiconductors",
-      "rationale": "Why this improves portfolio Sharpe — be specific",
-      "why_now": "Current catalyst or structural thesis",
-      "exp_return": 0.45,
-      "ann_vol": 0.65
-    }}
-  ],
-  "vol_reducers": [
-    {{
-      "ticker": "WMT",
-      "company": "Walmart Inc",
-      "sector": "Consumer Staples",
-      "rationale": "Why this reduces portfolio volatility",
-      "why_now": "Defensive rationale or catalyst",
-      "exp_return": 0.08,
-      "ann_vol": 0.18
-    }}
-  ]
-}}"""
+Return ONLY valid JSON (no markdown, no preamble):
+{{"portfolio_analysis":"One concise sentence on the portfolio strength and main risk.",
+  "sharpe_enhancers":[
+    {{"ticker":"NVDA","company":"NVIDIA Corporation","sector":"Semiconductors",
+      "rationale":"Why this improves Sharpe","why_now":"Current catalyst",
+      "exp_return":0.45,"ann_vol":0.65}}],
+  "vol_reducers":[
+    {{"ticker":"WMT","company":"Walmart Inc","sector":"Consumer Staples",
+      "rationale":"Why this reduces vol","why_now":"Defensive rationale",
+      "exp_return":0.08,"ann_vol":0.18}}]}}"""
 
     try:
-        r = req.post(
-            ANTHROPIC_BASE,
-            headers={
-                'x-api-key': ANTHROPIC_KEY,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json',
-            },
-            json={
-                'model': 'claude-sonnet-4-6',
-                'max_tokens': 2000,
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-            timeout=30,
-        )
+        r = req.post(ANTHROPIC_BASE,
+            headers={'x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01',
+                     'content-type':'application/json'},
+            json={'model':'claude-sonnet-4-6','max_tokens':2000,
+                  'messages':[{'role':'user','content':prompt}]}, timeout=30)
         if r.status_code != 200:
-            print(f'[Claude] HTTP {r.status_code}: {r.text[:200]}')
+            print(f'[Claude] HTTP {r.status_code}')
             return None
         text = r.json()['content'][0]['text']
         s, e = text.find('{'), text.rfind('}') + 1
-        if s < 0 or e <= 0: return None
-        return json.loads(text[s:e])
+        return json.loads(text[s:e]) if s >= 0 and e > 0 else None
     except Exception as ex:
         print(f'[Claude] error: {ex}')
         return None
 
 
 def _enrich_with_impact(claude_result, tickers, weights, data):
-    """
-    Take Claude's suggestions, fetch Alpaca data for each,
-    run marginal_impact(), and return enriched card dicts.
-    """
-    def enrich_list(items, item_type):
+    def enrich(items, kind):
         out = []
         for s in items:
             t = s.get('ticker','').upper()
             if not t: continue
             ann_r = s.get('exp_return', 0.15)
             ann_v = s.get('ann_vol',    0.40)
-            # Fetch live data for this ticker
-            cand_live, _ = fetch_returns([t]) if t else ({}, False)
-            if t in cand_live:
-                cand_data = cand_live[t]
-            else:
-                cand_data = {
-                    'returns': _simulated_returns(t).tolist(),
-                    'ann_ret': ann_r, 'ann_vol': ann_v,
-                    'price':   TICKER_PRIORS.get(t, DEFAULT_PRIOR)[2],
-                    'sharpe':  round((ann_r - 0.045) / ann_v, 3) if ann_v else 0,
-                }
-            # Marginal impact
-            if data and len(data) >= 2:
-                impact = marginal_impact(tickers, weights, data, t, cand_data)
-            else:
-                impact = {
-                    'sharpe_delta': round((ann_r - 0.045) / ann_v * 0.05, 3) if ann_v else 0,
-                    'vol_delta': 0.0, 'ret_delta': round(ann_r * 0.05 * 100, 2),
-                    'corr_to_book': 0.25 if item_type == 'complement' else 0.08,
-                    'new_sharpe': 0, 'new_vol': 0, 'new_ret': 0,
-                }
+            _, prior_vol, prior_price = TICKER_PRIORS.get(t, DEFAULT_PRIOR)
+            cand_data = {
+                'returns':  _simulated_returns(t).tolist(),
+                'ann_ret':  RF + 1.0 * ERP,   # CAPM with beta=1 for candidates
+                'ann_vol':  ann_v,
+                'beta':     1.0,
+                'price':    prior_price,
+                'sharpe':   round((RF + ERP - RF) / ann_v, 3) if ann_v else 0,
+            }
+            impact = (marginal_impact(tickers, weights, data, t, cand_data)
+                      if data and len(data) >= 2
+                      else {'sharpe_delta':0,'vol_delta':0,'ret_delta':0,
+                             'corr_to_book':0.25,'new_sharpe':0,'new_vol':0,'new_ret':0})
             out.append({
-                'ticker':       t,
-                'desc':         s.get('company','') + ' — ' + s.get('why_now',''),
-                'sector':       s.get('sector', 'Other'),
-                'rationale':    s.get('rationale',''),
-                'exp_return':   ann_r,
-                'ann_vol':      ann_v,
-                'type':         item_type,
-                **impact,
+                'ticker': t, 'desc': s.get('company','') + ' — ' + s.get('why_now',''),
+                'sector': s.get('sector','Other'), 'rationale': s.get('rationale',''),
+                'exp_return': ann_r, 'ann_vol': ann_v, 'type': kind, **impact,
             })
         return out
 
-    return (
-        enrich_list(claude_result.get('sharpe_enhancers',[]), 'complement'),
-        enrich_list(claude_result.get('vol_reducers',[]),     'diversifier'),
-        claude_result.get('portfolio_analysis',''),
-    )
+    return (enrich(claude_result.get('sharpe_enhancers',[]), 'complement'),
+            enrich(claude_result.get('vol_reducers',[]),     'diversifier'),
+            claude_result.get('portfolio_analysis',''))
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -225,7 +171,7 @@ def analyze():
 
     data, is_live = fetch_returns(tickers)
     if len(data) < 2:
-        return jsonify({'error': 'Could not load data for these tickers.'}), 400
+        return jsonify({'error': 'Could not load data.'}), 400
 
     tickers  = list(data.keys())
     mu       = np.array([data[t]['ann_ret'] for t in tickers])
@@ -236,15 +182,27 @@ def analyze():
     sectors  = _sectors(tickers)
     exposure = _exposure(tickers, weights, sectors)
 
+    live_sources = {t: data[t].get('data_source','') for t in tickers}
+    any_prior = any('PRIOR' in v for v in live_sources.values())
+    data_note = ('Live data (yfinance/Alpaca) + CAPM returns — vol and beta are real'
+                 if is_live and not any_prior
+                 else 'Partial live data — some tickers using prior vol (CAPM beta=1.0)'
+                 if is_live
+                 else 'Simulated data — deploy with valid API keys for live vol/beta')
+
     positions = [{
-        'ticker':  t,
-        'weight':  round(weights[i]*100, 1),
-        'dollars': round(weights[i]*capital, 2),
-        'price':   data[t]['price'],
-        'ann_ret': round(data[t]['ann_ret']*100, 1),
-        'ann_vol': round(data[t]['ann_vol']*100, 1),
-        'sharpe':  round(data[t]['sharpe'], 2),
-        'rc_pct':  round(rc[i]*100, 1),
+        'ticker':       t,
+        'weight':       round(weights[i]*100, 1),
+        'dollars':      round(weights[i]*capital, 2),
+        'price':        data[t]['price'],
+        'beta':         data[t]['beta'],
+        'capm_return':  data[t]['capm_return'],
+        'ann_ret':      data[t]['capm_return'],      # CAPM % for display
+        'trailing_ret': data[t].get('trailing_ret', 0),
+        'ann_vol':      round(data[t]['ann_vol']*100, 1),
+        'sharpe':       round(data[t]['sharpe'], 2),
+        'rc_pct':       round(rc[i]*100, 1),
+        'data_source':  data[t].get('data_source',''),
     } for i, t in enumerate(tickers)]
 
     return jsonify({
@@ -268,8 +226,7 @@ def analyze():
         'biweekly':  biweekly,
         'mode':      mode,
         'is_live':   is_live,
-        'data_note': 'Live Alpaca market data' if is_live else
-                     'Simulated data — calibrated to real return/vol priors.',
+        'data_note': data_note,
     })
 
 
@@ -281,17 +238,13 @@ def smart():
     user_prompt = body.get('user_prompt', '').strip()
 
     data, _ = fetch_returns(tickers) if tickers else ({}, False)
-
-    # Build sector / exposure summaries for Claude
     sectors  = _sectors(tickers) if tickers else {}
     exposure = _exposure(tickers, weights, sectors) if tickers else {}
 
-    # ── Try Claude first ──────────────────────────────────────────────────────
     claude_result = _call_claude(tickers, weights, sectors, exposure, user_prompt)
 
     if claude_result:
         sharpe_e, vol_r, analysis = _enrich_with_impact(claude_result, tickers, weights, data)
-        # Compute warnings using existing logic
         fallback = smart_suggestions_v2(tickers, weights, data)
         return jsonify({
             'sharpe_enhancers':   sharpe_e,
@@ -299,11 +252,142 @@ def smart():
             'warnings':           fallback.get('warnings', []),
             'portfolio_analysis': analysis,
             'powered_by':         'claude',
-            'ai_weight_pct':      fallback.get('ai_weight_pct', 0),
         })
 
-    # ── Fallback: hardcoded DB ────────────────────────────────────────────────
     result = smart_suggestions_v2(tickers, weights, data)
-    result['powered_by'] = 'database'
+    result['powered_by']         = 'database'
     result['portfolio_analysis'] = ''
     return jsonify(result)
+
+
+@api_bp.route('/market-data', methods=['GET'])
+def market_data():
+    """Previous-day OHLCV for Nasdaq 100 banner tickers via Alpaca."""
+    NDX50 = ['AAPL','MSFT','NVDA','AMZN','GOOG','META','TSLA','AVGO','NFLX','COST',
+             'AMD','QCOM','ADBE','TXN','AMGN','CSCO','SBUX','GILD','PANW','LRCX',
+             'AMAT','KLAC','REGN','ADP','BKNG','MRVL','CRWD','DDOG','TEAM','ZS',
+             'WDAY','ABNB','FTNT','CDNS','SNPS','ORLY','CTAS','PCAR','MNST','EA',
+             'BIIB','IDXX','ANSS','HON','PEP','INTC','MDLZ','ADI','VRTX','FISV']
+
+    ALPACA_KEY_    = os.environ.get('ALPACA_API_KEY', '')
+    ALPACA_SECRET_ = os.environ.get('ALPACA_SECRET_KEY', '')
+
+    if not ALPACA_KEY_ or not ALPACA_SECRET_:
+        return jsonify({'tickers': [], 'error': 'No Alpaca keys'}), 200
+
+    end   = __import__('datetime').date.today()
+    start = end - __import__('datetime').timedelta(days=5)
+    try:
+        r = __import__('requests').get(
+            'https://data.alpaca.markets/v2/stocks/bars',
+            headers={'APCA-API-KEY-ID': ALPACA_KEY_,
+                     'APCA-API-SECRET-KEY': ALPACA_SECRET_,
+                     'Accept': 'application/json'},
+            params={'symbols': ','.join(NDX50), 'timeframe': '1Day',
+                    'start': start.isoformat(), 'end': end.isoformat(),
+                    'limit': 10, 'sort': 'desc'},
+            timeout=15
+        )
+        if r.status_code != 200:
+            return jsonify({'tickers': [], 'error': f'Alpaca {r.status_code}'}), 200
+
+        bars = r.json().get('bars', {})
+        result = []
+        for t in NDX50:
+            t_bars = bars.get(t, [])
+            if len(t_bars) >= 2:
+                prev = t_bars[1]  # previous day (sorted desc)
+                curr = t_bars[0]
+                chg  = (curr['c'] - prev['c']) / prev['c'] * 100
+                result.append({'ticker': t, 'price': round(curr['c'],2),
+                                'change': round(chg,2), 'prev': round(prev['c'],2)})
+            elif len(t_bars) == 1:
+                b = t_bars[0]
+                chg = (b['c'] - b['o']) / b['o'] * 100
+                result.append({'ticker': t, 'price': round(b['c'],2),
+                                'change': round(chg,2), 'prev': round(b['o'],2)})
+        return jsonify({'tickers': result})
+    except Exception as ex:
+        return jsonify({'tickers': [], 'error': str(ex)}), 200
+
+
+@api_bp.route('/debug', methods=['GET'])
+def debug():
+    """Shows Alpaca connection status and real computed stats for portfolio tickers."""
+    from portfolio_engine import _compute_beta
+    PORT = ['GLW','SNDK','NBIS','GEV','MRVL','COHR','ANET','VST','NOW']
+    all_t = PORT + ['SPY']
+    raw, status = _fetch_alpaca(all_t, days=365)
+
+    spy_bars = raw.get('SPY', [])
+    spy_ret  = np.array([])
+    if spy_bars and len(spy_bars) >= 30:
+        sc      = np.array([b['c'] for b in spy_bars], float)
+        spy_ret = np.diff(sc) / sc[:-1]
+
+    rows = []
+    for t in PORT:
+        bars = raw.get(t, [])
+        live = bars and len(bars) >= 30
+        if live:
+            closes  = np.array([b['c'] for b in bars], float)
+            dr      = np.diff(closes) / closes[:-1]
+            vol     = float(dr.std() * np.sqrt(252))
+            trail   = float((1 + dr.mean())**252 - 1)
+            price   = float(closes[-1])
+            beta    = _compute_beta(dr, spy_ret) if len(spy_ret) >= 30 else 1.0
+            capm    = RF + beta * ERP
+            n_bars  = len(bars)
+            d_from  = bars[0]['t'][:10]
+            d_to    = bars[-1]['t'][:10]
+        else:
+            _, vol, price = TICKER_PRIORS.get(t, DEFAULT_PRIOR)
+            trail  = 0.0; beta = 1.0; capm = RF + ERP
+            n_bars = 0; d_from = d_to = 'N/A'
+        rows.append(dict(t=t, live=live, n=n_bars, d_from=d_from, d_to=d_to,
+                         price=price, vol=vol, beta=beta, capm=capm, trail=trail))
+
+    spy_info = (f"{len(spy_bars)} bars {spy_bars[0]['t'][:10]}→{spy_bars[-1]['t'][:10]}"
+                if spy_bars else "NO SPY DATA — beta defaults to 1.0")
+
+    row_html = ''
+    for r in rows:
+        badge = '<span style="color:#4ade80;font-weight:800">✓ LIVE</span>' if r['live'] \
+                else '<span style="color:#f87171;font-weight:800">✗ PRIOR</span>'
+        row_html += f"""<tr>
+          <td style="font-weight:800;font-size:14px">{r['t']}</td>
+          <td>{badge}</td>
+          <td style="color:#5a5270">{r['n']} bars ({r['d_from']}→{r['d_to']})</td>
+          <td style="color:#e8e6f0">${r['price']:.2f}</td>
+          <td style="color:#9b6dff">{r['vol']*100:.1f}%</td>
+          <td style="color:#7b8fff">{r['beta']:.2f}</td>
+          <td style="color:#4ade80">+{r['capm']*100:.1f}%</td>
+          <td style="color:#fbbf24">{r['trail']*100:+.1f}%</td>
+        </tr>"""
+
+    ok = 'OK' in status
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Debug</title>
+<style>body{{background:#0d0d13;color:#e8e6f0;font-family:monospace;padding:28px;font-size:13px}}
+h1{{color:#9b6dff;margin-bottom:8px}}
+.status{{background:#16141f;border:1px solid #2a2040;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:12px;line-height:1.8}}
+table{{width:100%;border-collapse:collapse}}
+th{{text-align:left;padding:8px 10px;color:#5a5270;border-bottom:1px solid #2a2040;font-size:10px;text-transform:uppercase;letter-spacing:.08em}}
+td{{padding:9px 10px;border-bottom:0.5px solid rgba(42,32,64,.4)}}
+.note{{font-size:11px;color:#5a5270;margin-top:20px;line-height:1.8}}</style></head><body>
+<h1>🔬 Alpaca Debug — Wolf//Portfolio</h1>
+<div class="status">
+<b>Alpaca status:</b> <span style="color:{'#4ade80' if ok else '#f87171'}">{status}</span><br>
+<b>SPY for beta:</b> {spy_info}<br>
+<b>Keys present:</b> {'✓ ALPACA_API_KEY + ALPACA_SECRET_KEY' if ALPACA_KEY else '✗ Missing — set in Railway Variables'}</div>
+<table><thead><tr><th>Ticker</th><th>Source</th><th>Coverage</th>
+<th>Price</th><th>Realized Vol</th><th>Beta vs SPY</th>
+<th>CAPM Return</th><th>Trailing 1yr</th></tr></thead>
+<tbody>{row_html}</tbody></table>
+<div class="note">
+<b>Vol:</b> daily_std × √252 from real price bars<br>
+<b>Beta:</b> OLS regression vs SPY daily returns<br>
+<b>CAPM Return:</b> Rf(4.5%) + β × ERP(5.5%) — drives optimizer + Sharpe<br>
+<b>Trailing 1yr:</b> informational only, not used in any calculation<br>
+If PRIOR shows, Alpaca returned no bars — check status above for HTTP error.
+</div></body></html>"""
+    return html, 200, {'Content-Type': 'text/html'}
