@@ -40,22 +40,24 @@ def _fetch_fmp_targets(tickers: list) -> dict:
 
     def fetch_one(t):
         try:
+            # Current FMP endpoint (v3 stable, replaces deprecated v4 consensus)
             r = requests.get(
-                f"{FMP_BASE}/price-target-consensus",
-                params={"symbol": t, "apikey": fmp_key},
+                "https://financialmodelingprep.com/api/v3/price-target",
+                params={"symbol": t, "apikey": fmp_key, "limit": 10},
                 timeout=8,
             )
             if r.status_code == 200:
                 data = r.json()
                 if data and isinstance(data, list) and len(data) > 0:
-                    target = (data[0].get("targetConsensus")
-                              or data[0].get("targetMedian")
-                              or data[0].get("targetHigh"))
-                    if target and float(target) > 0:
-                        print(f"[FMP] {t}: consensus=${float(target):.2f}")
-                        return t, float(target)
-            elif r.status_code == 429:
-                print(f"[FMP] Rate limited — {t}")
+                    # Average the most recent analyst targets (up to 10)
+                    targets = [float(d["priceTarget"]) for d in data
+                               if d.get("priceTarget") and float(d["priceTarget"]) > 0]
+                    if targets:
+                        target = sum(targets) / len(targets)
+                        print(f"[FMP] {t}: avg target=${target:.2f} ({len(targets)} analysts)")
+                        return t, target
+            elif r.status_code == 403:
+                print(f"[FMP] {t}: 403 — endpoint not available on this plan")
             else:
                 print(f"[FMP] {t}: HTTP {r.status_code}")
         except Exception as ex:
