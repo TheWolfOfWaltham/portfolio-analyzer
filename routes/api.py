@@ -191,18 +191,22 @@ def analyze():
                  else 'Simulated data — deploy with valid API keys for live vol/beta')
 
     positions = [{
-        'ticker':       t,
-        'weight':       round(weights[i]*100, 1),
-        'dollars':      round(weights[i]*capital, 2),
-        'price':        data[t]['price'],
-        'beta':         data[t]['beta'],
-        'capm_return':  data[t]['capm_return'],
-        'ann_ret':      data[t]['capm_return'],      # CAPM % for display
-        'trailing_ret': data[t].get('trailing_ret', 0),
-        'ann_vol':      round(data[t]['ann_vol']*100, 1),
-        'sharpe':       round(data[t]['sharpe'], 2),
-        'rc_pct':       round(rc[i]*100, 1),
-        'data_source':  data[t].get('data_source',''),
+        'ticker':          t,
+        'weight':          round(weights[i]*100, 1),
+        'dollars':         round(weights[i]*capital, 2),
+        'price':           data[t]['price'],
+        'beta':            data[t]['beta'],
+        'capm_return':     data[t]['capm_return'],
+        'analyst_target':  data[t].get('analyst_target'),
+        'analyst_implied': data[t].get('analyst_implied'),
+        'blended_return':  data[t].get('blended_return', data[t]['capm_return']),
+        'return_source':   data[t].get('return_source', 'CAPM only'),
+        'ann_ret':         data[t].get('blended_return', data[t]['capm_return']),
+        'trailing_ret':    data[t].get('trailing_ret', 0),
+        'ann_vol':         round(data[t]['ann_vol']*100, 1),
+        'sharpe':          round(data[t]['sharpe'], 2),
+        'rc_pct':          round(rc[i]*100, 1),
+        'data_source':     data[t].get('data_source',''),
     } for i, t in enumerate(tickers)]
 
     return jsonify({
@@ -220,6 +224,7 @@ def analyze():
         'frontier':  efficient_frontier(mu.tolist(), cov),
         'mc_paths':  monte_carlo(port_ret, port_vol, capital),
         'scenarios': scenario_projections(tickers, weights, capital, biweekly, data),
+        'cov_matrix': cov.tolist(),
         'sectors':   sectors,
         'exposure':  exposure,
         'capital':   capital,
@@ -259,6 +264,58 @@ def smart():
     result['portfolio_analysis'] = ''
     return jsonify(result)
 
+
+
+
+@api_bp.route('/recalculate', methods=['POST'])
+def recalculate():
+    """
+    Re-run optimizer and scenarios with user-overridden expected returns.
+    Accepts the covariance matrix from the prior analyze call to avoid re-fetching data.
+    """
+    body        = request.get_json(force=True)
+    tickers     = [t.strip().upper() for t in body.get('tickers', [])]
+    overrides   = body.get('returns', {})     # {ticker: pct e.g. 45.0}
+    cov_flat    = body.get('cov_matrix', [])  # from prior analyze response
+    betas       = body.get('betas', {})
+    capital     = float(body.get('capital', 10000))
+    biweekly    = float(body.get('biweekly', 500))
+    mode        = body.get('mode', 'sharpe')
+
+    if not tickers or not cov_flat:
+        return jsonify({'error': 'Missing tickers or cov_matrix'}), 400
+
+    try:
+        cov = np.array(cov_flat)
+        mu  = np.array([overrides.get(t, 10.0) / 100.0 for t in tickers])
+
+        weights  = optimize(mu.tolist(), cov, mode)
+        port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov)
+        rc = risk_contributions(weights, cov)
+
+        # Reconstruct minimal data dict for scenario_projections (needs beta)
+        data_stub = {t: {'ann_ret': mu[i], 'ann_vol': 0.5,
+                         'beta': betas.get(t, 1.0), 'returns': [0]*252}
+                     for i, t in enumerate(tickers)}
+
+        return jsonify({
+            'tickers':   tickers,
+            'weights':   [round(w*100,1) for w in weights],
+            'portfolio': {
+                'ann_ret':       round(port_ret*100,1),
+                'ann_vol':       round(port_vol*100,1),
+                'sharpe':        round(sharpe,2),
+                'port_3yr_geom': round(((1+port_ret-0.5*port_vol**2)**3-1)*100,1),
+                'var_95':        round(-1.645*port_vol*100,1),
+                'max_dd_est':    round(-2.5*port_vol*100,1),
+            },
+            'frontier':  efficient_frontier(mu.tolist(), cov),
+            'mc_paths':  monte_carlo(port_ret, port_vol, capital),
+            'scenarios': scenario_projections(tickers, weights, capital, biweekly, data_stub),
+            'rc':        risk_contributions(weights, cov),
+        })
+    except Exception as ex:
+        return jsonify({'error': str(ex)}), 500
 
 @api_bp.route('/market-data', methods=['GET'])
 def market_data():
