@@ -459,8 +459,8 @@ def fmp_test():
         return f"<pre>FMP_API_KEY not set in environment.\nAll env vars: {[k for k in os.environ if 'FMP' in k or 'API' in k]}</pre>", 200
     try:
         r = req.get(
-            "https://financialmodelingprep.com/api/v4/price-target-consensus",
-            params={"symbol": "AAPL", "apikey": key},
+            "https://financialmodelingprep.com/api/v3/price-target",
+            params={"symbol": "AAPL", "apikey": key, "limit": 3},
             timeout=10
         )
         return f"<pre>Key found: {key[:8]}...\nHTTP status: {r.status_code}\nResponse: {r.text[:500]}</pre>", 200
