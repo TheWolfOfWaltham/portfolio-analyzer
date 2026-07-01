@@ -72,6 +72,32 @@ TICKER_PRIORS = {
 DEFAULT_PRIOR = (0.15, 0.45, 100)
 
 
+# ── Beta priors for short-history / new listings ──────────────────────────────
+# Used when a ticker has < MIN_BARS_FOR_BETA trading days (OLS unreliable on spinoffs)
+MIN_BARS_FOR_BETA = 180   # ~9 months of trading days
+
+TICKER_BETA_PRIORS = {
+    # AI Memory / NAND — high vol, high systematic risk
+    'SNDK': 2.8,   # SanDisk spinoff Oct 2024; peer to MU (β~2.0), WDC, NVDA memory
+    # AI Cloud infra — recent Nasdaq listing, GPU cluster exposure
+    'NBIS': 2.5,   # Nebius Nov 2023; peer to AI hyperscaler names
+    # Nuclear / recently relisted
+    'CEG':  1.2,   # Constellation Energy; regulated utility-adjacent
+    # General fallback by sector (used if ticker not explicitly mapped)
+    # Power utilities: ~1.1, AI semis: ~2.0, Networking: ~1.5
+}
+
+# Sector-level fallback betas (if ticker not in TICKER_BETA_PRIORS)
+SECTOR_BETA_FALLBACK = {
+    'Semiconductors': 2.0, 'AI Cloud Infra': 2.3, 'AI Infra Optical': 1.6,
+    'Custom ASIC': 2.0,    'AI Networking': 1.5,   'Optical Transceivers': 1.7,
+    'Power Infra': 1.3,    'Power Generation': 1.1, 'Nuclear Power': 1.2,
+    'Enterprise SaaS': 1.3,'Cybersecurity': 1.5,   'Fintech': 1.4,
+    'Consumer Staples': 0.7,'Healthcare': 0.8,      'Financials': 1.1,
+    'Conglomerate': 0.9,   'Utilities': 0.7,
+}
+
+
 def _simulated_returns(ticker: str, n: int = 252) -> np.ndarray:
     """Simulated returns from prior vol — last-resort fallback only."""
     _, ann_vol, _ = TICKER_PRIORS.get(ticker.upper(), DEFAULT_PRIOR)
@@ -231,7 +257,15 @@ def fetch_returns(tickers: list, period_days: int = 365) -> tuple:
             print(f"[fetch_returns] ⚠️ {t}: using prior vol={ann_vol:.0%}")
 
         # CAPM expected return (drives optimizer, Sharpe, risk math)
-        beta     = _compute_beta(daily_ret, spy_ret) if len(spy_ret) >= 30 else 1.0
+        n_bars = len(daily_ret)
+        if n_bars >= MIN_BARS_FOR_BETA and len(spy_ret) >= 30:
+            # Enough history — compute OLS beta
+            beta = _compute_beta(daily_ret, spy_ret)
+        else:
+            # Short history (spinoff / new listing) — use sector proxy
+            beta = TICKER_BETA_PRIORS.get(t.upper(), 1.2)
+            print(f"[fetch_returns] {t}: only {n_bars} bars — "
+                  f"using sector proxy β={beta} (OLS unreliable on short history)")
         capm_ret = RF + beta * ERP
 
         result[t] = {
