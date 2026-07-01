@@ -448,3 +448,21 @@ td{{padding:9px 10px;border-bottom:0.5px solid rgba(42,32,64,.4)}}
 If PRIOR shows, Alpaca returned no bars — check status above for HTTP error.
 </div></body></html>"""
     return html, 200, {'Content-Type': 'text/html'}
+
+
+@api_bp.route('/fmp-test', methods=['GET'])
+def fmp_test():
+    """Quick test — visit /api/fmp-test to verify FMP key is working."""
+    import os, requests as req
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    if not key:
+        return f"<pre>FMP_API_KEY not set in environment.\nAll env vars: {[k for k in os.environ if 'FMP' in k or 'API' in k]}</pre>", 200
+    try:
+        r = req.get(
+            "https://financialmodelingprep.com/api/v4/price-target-consensus",
+            params={"symbol": "AAPL", "apikey": key},
+            timeout=10
+        )
+        return f"<pre>Key found: {key[:8]}...\nHTTP status: {r.status_code}\nResponse: {r.text[:500]}</pre>", 200
+    except Exception as ex:
+        return f"<pre>Key found: {key[:8]}...\nError: {ex}</pre>", 200
