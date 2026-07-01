@@ -29,9 +29,10 @@ def _fetch_fmp_targets(tickers: list) -> dict:
     """
     Fetch analyst consensus price targets from FMP in parallel.
     Returns {ticker: consensus_target_price} — empty dict if no key or API fails.
-    Blended return = 70% analyst implied + 30% CAPM.
+    Reads FMP_API_KEY from environment on every call (never stale after redeploy).
     """
-    if not FMP_KEY:
+    fmp_key = os.environ.get("FMP_API_KEY", "").strip()
+    if not fmp_key:
         print("[FMP] No FMP_API_KEY set — skipping analyst targets")
         return {}
 
@@ -41,7 +42,7 @@ def _fetch_fmp_targets(tickers: list) -> dict:
         try:
             r = requests.get(
                 f"{FMP_BASE}/price-target-consensus",
-                params={"symbol": t, "apikey": FMP_KEY},
+                params={"symbol": t, "apikey": fmp_key},
                 timeout=8,
             )
             if r.status_code == 200:
