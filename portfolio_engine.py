@@ -16,8 +16,62 @@ ALPACA_KEY    = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.environ.get("ALPACA_SECRET_KEY", "")
 ALPACA_BASE   = "https://data.alpaca.markets"
 
+FMP_KEY  = os.environ.get("FMP_API_KEY", "")
+FMP_BASE = "https://financialmodelingprep.com/api/v4"
+
 RF  = 0.045   # risk-free rate (approx Fed funds)
 ERP = 0.055   # equity risk premium (historical avg)
+ANALYST_WEIGHT = 0.70   # analyst consensus weight in blended return
+CAPM_WEIGHT    = 0.30   # CAPM weight in blended return
+
+
+def _fetch_fmp_targets(tickers: list) -> dict:
+    """
+    Fetch analyst consensus price targets from FMP in parallel.
+    Returns {ticker: consensus_target_price} — empty dict if no key or API fails.
+    Blended return = 70% analyst implied + 30% CAPM.
+    """
+    if not FMP_KEY:
+        print("[FMP] No FMP_API_KEY set — skipping analyst targets")
+        return {}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def fetch_one(t):
+        try:
+            r = requests.get(
+                f"{FMP_BASE}/price-target-consensus",
+                params={"symbol": t, "apikey": FMP_KEY},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data and isinstance(data, list) and len(data) > 0:
+                    target = (data[0].get("targetConsensus")
+                              or data[0].get("targetMedian")
+                              or data[0].get("targetHigh"))
+                    if target and float(target) > 0:
+                        print(f"[FMP] {t}: consensus=${float(target):.2f}")
+                        return t, float(target)
+            elif r.status_code == 429:
+                print(f"[FMP] Rate limited — {t}")
+            else:
+                print(f"[FMP] {t}: HTTP {r.status_code}")
+        except Exception as ex:
+            print(f"[FMP] {t} error: {ex}")
+        return t, None
+
+    result = {}
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {pool.submit(fetch_one, t): t for t in tickers}
+        for f in futures:
+            ticker, target = f.result()
+            if target:
+                result[ticker] = target
+
+    coverage = len(result)
+    print(f"[FMP] Got targets for {coverage}/{len(tickers)} tickers")
+    return result
 
 # Market scenario definitions (annual SPY returns)
 MARKET_SCENARIOS = {
@@ -228,6 +282,9 @@ def fetch_returns(tickers: list, period_days: int = 365) -> tuple:
     alpaca_data, alpaca_status = _fetch_alpaca(missing, days=period_days) if missing else ({}, "skipped")
     print(f"[alpaca] status={alpaca_status}")
 
+    # Step 3: FMP analyst price targets (parallel, non-blocking)
+    fmp_targets = _fetch_fmp_targets(tickers)
+
     # Merge SPY returns for beta
     spy_entry = yf_data.get("SPY") or alpaca_data.get("SPY")
     spy_ret   = np.array([])
@@ -268,23 +325,38 @@ def fetch_returns(tickers: list, period_days: int = 365) -> tuple:
                   f"using sector proxy β={beta} (OLS unreliable on short history)")
         capm_ret = RF + beta * ERP
 
+        # Analyst-implied return from FMP (70%) blended with CAPM (30%)
+        analyst_target  = fmp_targets.get(t)
+        if analyst_target and price > 0:
+            analyst_implied = (analyst_target / price) - 1
+            blended_ret     = ANALYST_WEIGHT * analyst_implied + CAPM_WEIGHT * capm_ret
+            return_source   = "70% analyst / 30% CAPM"
+        else:
+            analyst_implied = None
+            blended_ret     = capm_ret
+            return_source   = "CAPM only (no FMP data)"
+
         result[t] = {
-            "returns":     daily_ret.tolist(),
-            "ann_ret":     round(capm_ret, 4),        # CAPM — used by optimizer
-            "ann_vol":     round(ann_vol, 4),          # realized vol from live bars
-            "beta":        round(beta, 3),
-            "capm_return": round(capm_ret * 100, 2),   # % for display
-            "trailing_ret":round(trail_ret * 100, 1),  # informational only
-            "price":       round(price, 2),
-            "sharpe":      round((capm_ret - RF) / ann_vol, 3) if ann_vol > 0 else 0,
-            "data_source": source,
-            "n_days":      len(daily_ret),
+            "returns":          daily_ret.tolist(),
+            "ann_ret":          round(blended_ret, 4),     # blended — drives optimizer
+            "ann_vol":          round(ann_vol, 4),
+            "beta":             round(beta, 3),
+            "capm_return":      round(capm_ret * 100, 2),
+            "analyst_target":   round(analyst_target, 2) if analyst_target else None,
+            "analyst_implied":  round(analyst_implied * 100, 1) if analyst_implied is not None else None,
+            "blended_return":   round(blended_ret * 100, 2),
+            "trailing_ret":     round(trail_ret * 100, 1),
+            "return_source":    return_source,
+            "price":            round(price, 2),
+            "sharpe":           round((blended_ret - RF) / ann_vol, 3) if ann_vol > 0 else 0,
+            "data_source":      source,
+            "n_days":           len(daily_ret),
         }
         print(f"[fetch_returns] {t}: β={beta:.2f} capm={capm_ret*100:.1f}% "
-              f"vol={ann_vol*100:.1f}% sharpe={result[t]['sharpe']:.2f} src={source}")
+              f"analyst={f'{analyst_implied*100:.0f}%' if analyst_implied else 'N/A'} "
+              f"blended={blended_ret*100:.1f}% vol={ann_vol*100:.1f}%")
 
-    live_count = sum(1 for v in result.values() if "live" in v.get("data_source","") or
-                     "alpaca" in v.get("data_source",""))
+    live_count = sum(1 for v in result.values() if "PRIOR" not in v.get("data_source",""))
     print(f"[fetch_returns] {live_count}/{len(tickers)} tickers live\n")
     return result, is_live
 
