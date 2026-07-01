@@ -797,13 +797,21 @@ function renderTreemap(positions){
 let smartVisible = false;
 function initStarBtn(){
   const btn = document.getElementById('starBtn');
-  if(!btn||!window.gsap) return;
+  if(!btn) return;
+  // CSS keyframe handles the spin as fallback
+  // GSAP enhances with color animation if available
+  if(!window.gsap) return;
+  gsap.set('#starSvg', {transformOrigin:'50% 50%'});
   btn.addEventListener('mouseenter',()=>{
-    gsap.to('#starSvg', {rotation:360, duration:0.5, ease:'back.out(1.4)', overwrite:true});
-    gsap.to('#starSvg path', {fill:'#6b3aff', stroke:'#c084ff', duration:0.3});
+    // +=360 = always spin a full turn forward from current rotation
+    gsap.to('#starSvg', {rotation:'+=360', duration:0.55,
+      ease:'back.out(1.8)', overwrite:true});
+    gsap.to('#starSvg path', {fill:'#6b3aff', stroke:'#c084ff',
+      duration:0.25, overwrite:true});
   });
   btn.addEventListener('mouseleave',()=>{
-    gsap.to('#starSvg path', {fill:'#2d1b69', stroke:'#6b3aff', duration:0.3});
+    gsap.to('#starSvg path', {fill:'#2d1b69', stroke:'#6b3aff',
+      duration:0.3, overwrite:true});
   });
 }
 
