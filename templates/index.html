@@ -405,6 +405,10 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
       <div class="chart-card" style="padding:0;overflow:hidden">
         <table class="pos-table" id="posTable"></table>
       </div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:10px">
+        <span style="font-size:11px;color:var(--text-dim);font-weight:500">Edit "Your Estimate" cells above then recalculate</span>
+        <button class="btn btn-primary" id="recalcBtn" onclick="runRecalculate()" style="padding:8px 18px;font-size:12px">↺ Recalculate with my estimates</button>
+      </div>
     </div>
 
     <div class="section">
