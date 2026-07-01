@@ -456,13 +456,22 @@ def fmp_test():
     import os, requests as req
     key = os.environ.get("FMP_API_KEY", "").strip()
     if not key:
-        return f"<pre>FMP_API_KEY not set in environment.\nAll env vars: {[k for k in os.environ if 'FMP' in k or 'API' in k]}</pre>", 200
-    try:
-        r = req.get(
-            "https://financialmodelingprep.com/api/v3/price-target",
-            params={"symbol": "AAPL", "apikey": key, "limit": 3},
-            timeout=10
-        )
-        return f"<pre>Key found: {key[:8]}...\nHTTP status: {r.status_code}\nResponse: {r.text[:500]}</pre>", 200
-    except Exception as ex:
-        return f"<pre>Key found: {key[:8]}...\nError: {ex}</pre>", 200
+        return f"<pre>FMP_API_KEY not set in environment.</pre>", 200
+
+    results = []
+    endpoints = [
+        ("stable/price-target",      f"https://financialmodelingprep.com/stable/price-target?symbol=AAPL&limit=1&apikey={key}"),
+        ("stable/analyst-estimates", f"https://financialmodelingprep.com/stable/analyst-estimates?symbol=AAPL&limit=1&apikey={key}"),
+        ("v3/price-target",          f"https://financialmodelingprep.com/api/v3/price-target?symbol=AAPL&limit=1&apikey={key}"),
+        ("v4/price-target-consensus",f"https://financialmodelingprep.com/api/v4/price-target-consensus?symbol=AAPL&apikey={key}"),
+        ("v3/analyst-estimates",     f"https://financialmodelingprep.com/api/v3/analyst-estimates/AAPL?limit=1&apikey={key}"),
+    ]
+    for name, url in endpoints:
+        try:
+            r = req.get(url, timeout=8)
+            snippet = r.text[:200].replace('<','&lt;')
+            results.append(f"{name}: HTTP {r.status_code}\n  {snippet}\n")
+        except Exception as ex:
+            results.append(f"{name}: ERROR {ex}\n")
+
+    return f"<pre>Key: {key[:8]}...\n\n" + "\n".join(results) + "</pre>", 200
