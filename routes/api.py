@@ -5,7 +5,8 @@ from portfolio_engine import (fetch_returns, build_cov, optimize, efficient_fron
                                monte_carlo, risk_contributions, portfolio_stats,
                                scenario_projections, smart_suggestions_v2,
                                marginal_impact, _simulated_returns, _fetch_alpaca,
-                               TICKER_PRIORS, DEFAULT_PRIOR, RF, ERP)
+                               TICKER_PRIORS, DEFAULT_PRIOR, RF, ERP,
+                               CAPM_WEIGHT, MOMENTUM_WEIGHT, ANALYST_WEIGHT)
 from dotenv import load_dotenv
 import numpy as np
 
@@ -184,11 +185,11 @@ def analyze():
 
     live_sources = {t: data[t].get('data_source','') for t in tickers}
     any_prior = any('PRIOR' in v for v in live_sources.values())
-    data_note = ('Live data (yfinance/Alpaca) + CAPM returns — vol and beta are real'
+    data_note = ('Live data: vol/beta from price bars, returns = 30% CAPM + 40% momentum + 30% analyst (Finnhub)'
                  if is_live and not any_prior
-                 else 'Partial live data — some tickers using prior vol (CAPM beta=1.0)'
+                 else 'Partial live data — blended returns where available, CAPM fallback for missing tickers'
                  if is_live
-                 else 'Simulated data — deploy with valid API keys for live vol/beta')
+                 else 'Simulated — add FINNHUB_API_KEY + yfinance/Alpaca keys to Railway for live data')
 
     positions = [{
         'ticker':          t,
@@ -452,26 +453,17 @@ If PRIOR shows, Alpaca returned no bars — check status above for HTTP error.
 
 @api_bp.route('/fmp-test', methods=['GET'])
 def fmp_test():
-    """Quick test — visit /api/fmp-test to verify FMP key is working."""
     import os, requests as req
-    key = os.environ.get("FMP_API_KEY", "").strip()
-    if not key:
-        return f"<pre>FMP_API_KEY not set in environment.</pre>", 200
-
-    results = []
-    endpoints = [
-        ("stable/price-target",      f"https://financialmodelingprep.com/stable/price-target?symbol=AAPL&limit=1&apikey={key}"),
-        ("stable/analyst-estimates", f"https://financialmodelingprep.com/stable/analyst-estimates?symbol=AAPL&limit=1&apikey={key}"),
-        ("v3/price-target",          f"https://financialmodelingprep.com/api/v3/price-target?symbol=AAPL&limit=1&apikey={key}"),
-        ("v4/price-target-consensus",f"https://financialmodelingprep.com/api/v4/price-target-consensus?symbol=AAPL&apikey={key}"),
-        ("v3/analyst-estimates",     f"https://financialmodelingprep.com/api/v3/analyst-estimates/AAPL?limit=1&apikey={key}"),
-    ]
-    for name, url in endpoints:
+    fh_key = os.environ.get("FINNHUB_API_KEY","").strip()
+    fmp_key = os.environ.get("FMP_API_KEY","").strip()
+    out = [f"FINNHUB_API_KEY: {'SET (' + fh_key[:8] + '...)' if fh_key else 'NOT SET'}",
+           f"FMP_API_KEY: {'SET (' + fmp_key[:8] + '...)' if fmp_key else 'NOT SET'}", ""]
+    if fh_key:
         try:
-            r = req.get(url, timeout=8)
-            snippet = r.text[:200].replace('<','&lt;')
-            results.append(f"{name}: HTTP {r.status_code}\n  {snippet}\n")
+            r = req.get(f"https://finnhub.io/api/v1/stock/price-target",
+                        params={"symbol":"AAPL","token":fh_key}, timeout=8)
+            out.append(f"Finnhub AAPL test: HTTP {r.status_code}")
+            out.append(r.text[:300])
         except Exception as ex:
-            results.append(f"{name}: ERROR {ex}\n")
-
-    return f"<pre>Key: {key[:8]}...\n\n" + "\n".join(results) + "</pre>", 200
+            out.append(f"Finnhub error: {ex}")
+    return "<pre>" + "\n".join(out) + "</pre>", 200
