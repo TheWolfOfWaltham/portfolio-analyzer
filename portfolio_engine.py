@@ -16,103 +16,18 @@ ALPACA_KEY    = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET = os.environ.get("ALPACA_SECRET_KEY", "")
 ALPACA_BASE   = "https://data.alpaca.markets"
 
-FMP_KEY  = os.environ.get("FMP_API_KEY", "")
-FMP_BASE = "https://financialmodelingprep.com/api/v4"
+FMP_KEY      = os.environ.get("FMP_API_KEY", "")
+FMP_BASE     = "https://financialmodelingprep.com/api/v4"
+FINNHUB_KEY  = os.environ.get("FINNHUB_API_KEY", "")
+FINNHUB_BASE = "https://finnhub.io/api/v1"
 
 RF  = 0.045   # risk-free rate (approx Fed funds)
 ERP = 0.055   # equity risk premium (historical avg)
-ANALYST_WEIGHT = 0.70   # analyst consensus weight in blended return
-CAPM_WEIGHT    = 0.30   # CAPM weight in blended return
+CAPM_WEIGHT     = 0.30  # CAPM — stability anchor
+MOMENTUM_WEIGHT = 0.40  # dampened trailing momentum (academic: Jegadeesh-Titman)
+ANALYST_WEIGHT  = 0.30  # Finnhub analyst consensus
 
-
-def _fetch_fmp_targets(tickers: list) -> dict:
-    """
-    Fetch analyst consensus price targets from FMP in parallel.
-    Returns {ticker: consensus_target_price} — empty dict if no key or API fails.
-    Reads FMP_API_KEY from environment on every call (never stale after redeploy).
-    """
-    fmp_key = os.environ.get("FMP_API_KEY", "").strip()
-    if not fmp_key:
-        print("[FMP] No FMP_API_KEY set — skipping analyst targets")
-        return {}
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def fetch_one(t):
-        try:
-            # Current FMP endpoint (v3 stable, replaces deprecated v4 consensus)
-            r = requests.get(
-                "https://financialmodelingprep.com/api/v3/price-target",
-                params={"symbol": t, "apikey": fmp_key, "limit": 10},
-                timeout=8,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                if data and isinstance(data, list) and len(data) > 0:
-                    # Average the most recent analyst targets (up to 10)
-                    targets = [float(d["priceTarget"]) for d in data
-                               if d.get("priceTarget") and float(d["priceTarget"]) > 0]
-                    if targets:
-                        target = sum(targets) / len(targets)
-                        print(f"[FMP] {t}: avg target=${target:.2f} ({len(targets)} analysts)")
-                        return t, target
-            elif r.status_code == 403:
-                print(f"[FMP] {t}: 403 — endpoint not available on this plan")
-            else:
-                print(f"[FMP] {t}: HTTP {r.status_code}")
-        except Exception as ex:
-            print(f"[FMP] {t} error: {ex}")
-        return t, None
-
-    result = {}
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {pool.submit(fetch_one, t): t for t in tickers}
-        for f in futures:
-            ticker, target = f.result()
-            if target:
-                result[ticker] = target
-
-    coverage = len(result)
-    print(f"[FMP] Got targets for {coverage}/{len(tickers)} tickers")
-    return result
-
-# Market scenario definitions (annual SPY returns)
-MARKET_SCENARIOS = {
-    "bull": {"spy": 0.22,  "label": "Bull — AI supercycle holds 3yr",
-             "color": "#2e7d32", "bg": "#e8f5e9"},
-    "base": {"spy": 0.09,  "label": "Base — normal market conditions",
-             "color": "#1565c0", "bg": "#e3f2fd"},
-    "bear": {"spy": -0.15, "label": "Bear — AI capex pause / recession",
-             "color": "#b71c1c", "bg": "#ffebee"},
-}
-
-# ── Smart DB ──────────────────────────────────────────────────────────────────
-SMART_DB = {
-    "AI_OPTICAL":  [("GLW","Corning — optical fiber, AI data-center supply chain","AI Infra Optical",0.55,0.70),
-                    ("COHR","Coherent — optical transceivers, NVDA stake","AI Infra Optical",0.55,0.75),
-                    ("LITE","Lumentum — optical components, AI network","AI Infra Optical",0.48,0.72)],
-    "AI_POWER":    [("GEV","GE Vernova — gas turbines, AI data-center power","Power Infra",0.45,0.42),
-                    ("CEG","Constellation Energy — nuclear PPAs, Microsoft/Walmart","Nuclear Power",0.20,0.35),
-                    ("VST","Vistra — power gen, KKR+NVDA Helix","Power Generation",0.25,0.38),
-                    ("ETR","Entergy — utility, low-vol AI power exposure","Utility",0.12,0.22)],
-    "AI_NETWORK":  [("ANET","Arista Networks — 40%+ EBITDA margin, AI ethernet","AI Networking",0.38,0.45),
-                    ("MRVL","Marvell — custom ASIC, hyperscaler chip design","Custom ASIC",0.65,0.65),
-                    ("AVGO","Broadcom — custom ASIC + networking","Semiconductors",0.40,0.45)],
-    "AI_COMPUTE":  [("SNDK","SanDisk — NAND AI memory, RAM supercycle","Semiconductors",0.80,1.80),
-                    ("NBIS","Nebius — GPU cloud infra, $47B backlog","AI Cloud",0.60,0.85),
-                    ("MU","Micron — DRAM/HBM, AI memory","Semiconductors",0.50,0.70)],
-    "BLUECHIP":    [("WMT","Walmart — defensive retail, low vol","Consumer Staples",0.08,0.18),
-                    ("JPM","JPMorgan — largest US bank, dividend","Financials",0.12,0.22),
-                    ("JNJ","Johnson & Johnson — healthcare, defensive","Healthcare",0.06,0.16),
-                    ("BRK/B","Berkshire Hathaway — Buffett diversified","Conglomerate",0.09,0.15),
-                    ("PG","Procter & Gamble — consumer staples","Consumer Staples",0.07,0.14)],
-    "GROWTH_DIV":  [("NOW","ServiceNow — enterprise SaaS, AI workflow","Enterprise SaaS",-0.05,0.40),
-                    ("SOFI","SoFi — fintech, S&P500 candidate","Fintech",0.10,0.55),
-                    ("CRWD","CrowdStrike — cybersecurity, AI-native","Cybersecurity",0.30,0.50)],
-    "ENERGY_TRANS":[("NEE","NextEra Energy — renewable power, utility","Utilities",0.10,0.20)],
-}
-
-# Fallback priors: (ann_ret_ignored, ann_vol, price) — vol/price used, ret replaced by CAPM
+# Fallback priors — vol and price used when live data unavailable
 TICKER_PRIORS = {
     "GLW":  (0.55, 0.70, 206),  "SNDK": (0.80, 1.80, 2150),
     "NBIS": (0.60, 0.85, 250),  "GEV":  (0.45, 0.42, 620),
@@ -124,35 +39,60 @@ TICKER_PRIORS = {
     "JNJ":  (0.06, 0.16, 155),  "PG":   (0.07, 0.14, 172),
     "SOFI": (0.10, 0.55, 17),   "CRWD": (0.30, 0.50, 380),
     "NEE":  (0.10, 0.20, 68),   "LITE": (0.48, 0.72, 95),
-    "ETR":  (0.12, 0.22, 82),
+    "ETR":  (0.12, 0.22, 82),   "AMD":  (0.55, 0.65, 180),
 }
 DEFAULT_PRIOR = (0.15, 0.45, 100)
 
 
-# ── Beta priors for short-history / new listings ──────────────────────────────
-# Used when a ticker has < MIN_BARS_FOR_BETA trading days (OLS unreliable on spinoffs)
-MIN_BARS_FOR_BETA = 180   # ~9 months of trading days
+def _fetch_analyst_targets(tickers: list) -> dict:
+    """
+    Fetch analyst consensus price targets from Finnhub (free tier, 60 calls/min).
+    Returns {ticker: mean_target_price}.
+    Falls back to FMP if Finnhub key not set (legacy accounts only).
+    """
+    from concurrent.futures import ThreadPoolExecutor
 
-TICKER_BETA_PRIORS = {
-    # AI Memory / NAND — high vol, high systematic risk
-    'SNDK': 2.8,   # SanDisk spinoff Oct 2024; peer to MU (β~2.0), WDC, NVDA memory
-    # AI Cloud infra — recent Nasdaq listing, GPU cluster exposure
-    'NBIS': 2.5,   # Nebius Nov 2023; peer to AI hyperscaler names
-    # Nuclear / recently relisted
-    'CEG':  1.2,   # Constellation Energy; regulated utility-adjacent
-    # General fallback by sector (used if ticker not explicitly mapped)
-    # Power utilities: ~1.1, AI semis: ~2.0, Networking: ~1.5
-}
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    fmp_key     = os.environ.get("FMP_API_KEY", "").strip()
 
-# Sector-level fallback betas (if ticker not in TICKER_BETA_PRIORS)
-SECTOR_BETA_FALLBACK = {
-    'Semiconductors': 2.0, 'AI Cloud Infra': 2.3, 'AI Infra Optical': 1.6,
-    'Custom ASIC': 2.0,    'AI Networking': 1.5,   'Optical Transceivers': 1.7,
-    'Power Infra': 1.3,    'Power Generation': 1.1, 'Nuclear Power': 1.2,
-    'Enterprise SaaS': 1.3,'Cybersecurity': 1.5,   'Fintech': 1.4,
-    'Consumer Staples': 0.7,'Healthcare': 0.8,      'Financials': 1.1,
-    'Conglomerate': 0.9,   'Utilities': 0.7,
-}
+    if not finnhub_key and not fmp_key:
+        print("[analyst] No FINNHUB_API_KEY or FMP_API_KEY — skipping targets")
+        return {}
+
+    def fetch_finnhub(t):
+        try:
+            r = requests.get(
+                f"{FINNHUB_BASE}/stock/price-target",
+                params={"symbol": t, "token": finnhub_key},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                d = r.json()
+                target = d.get("targetMean") or d.get("targetMedian")
+                if target and float(target) > 0:
+                    print(f"[Finnhub] {t}: mean=${float(target):.2f} "
+                          f"(hi=${d.get('targetHigh',0):.0f} "
+                          f"lo=${d.get('targetLow',0):.0f})")
+                    return t, float(target)
+            else:
+                print(f"[Finnhub] {t}: HTTP {r.status_code}")
+        except Exception as ex:
+            print(f"[Finnhub] {t} error: {ex}")
+        return t, None
+
+    result = {}
+    use_key = finnhub_key  # prefer Finnhub
+    fetch_fn = fetch_finnhub
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = [pool.submit(fetch_fn, t) for t in tickers]
+        for f in futures:
+            ticker, target = f.result()
+            if target:
+                result[ticker] = target
+
+    print(f"[analyst] Got targets for {len(result)}/{len(tickers)} tickers")
+    return result
 
 
 def _simulated_returns(ticker: str, n: int = 252) -> np.ndarray:
@@ -286,7 +226,7 @@ def fetch_returns(tickers: list, period_days: int = 365) -> tuple:
     print(f"[alpaca] status={alpaca_status}")
 
     # Step 3: FMP analyst price targets (parallel, non-blocking)
-    fmp_targets = _fetch_fmp_targets(tickers)
+    fmp_targets = _fetch_analyst_targets(tickers)
 
     # Merge SPY returns for beta
     spy_entry = yf_data.get("SPY") or alpaca_data.get("SPY")
@@ -328,16 +268,33 @@ def fetch_returns(tickers: list, period_days: int = 365) -> tuple:
                   f"using sector proxy β={beta} (OLS unreliable on short history)")
         capm_ret = RF + beta * ERP
 
-        # Analyst-implied return from FMP (70%) blended with CAPM (30%)
+        # ── Three-way blended return ──────────────────────────────────────────
+        # 30% CAPM + 40% dampened momentum + 30% analyst consensus
+        # Academic basis: Black-Litterman (1990), Jegadeesh-Titman momentum (1993)
+
+        # Dampened trailing momentum — sqrt(|r|) compresses extreme values
+        # GLW +42% → 65%, CRWD +72% → 85%, SNDK +3800% → capped at 100%
+        # Cap at 100% so even extreme momentum stocks don't dominate
+        if abs(trail_ret) > 0.001:
+            damped_mom = float(np.sign(trail_ret) * np.sqrt(abs(trail_ret)))
+            damped_mom = float(np.clip(damped_mom, -1.0, 1.0))
+        else:
+            damped_mom = trail_ret
+
         analyst_target  = fmp_targets.get(t)
         if analyst_target and price > 0:
             analyst_implied = (analyst_target / price) - 1
-            blended_ret     = ANALYST_WEIGHT * analyst_implied + CAPM_WEIGHT * capm_ret
-            return_source   = "70% analyst / 30% CAPM"
+            blended_ret     = (CAPM_WEIGHT * capm_ret
+                               + MOMENTUM_WEIGHT * damped_mom
+                               + ANALYST_WEIGHT * analyst_implied)
+            return_source   = "30% CAPM / 40% momentum / 30% analyst"
         else:
             analyst_implied = None
-            blended_ret     = capm_ret
-            return_source   = "CAPM only (no FMP data)"
+            # Without analyst: 43% CAPM + 57% dampened momentum (renormalized)
+            w_capm = CAPM_WEIGHT / (CAPM_WEIGHT + MOMENTUM_WEIGHT)
+            w_mom  = MOMENTUM_WEIGHT / (CAPM_WEIGHT + MOMENTUM_WEIGHT)
+            blended_ret     = w_capm * capm_ret + w_mom * damped_mom
+            return_source   = "43% CAPM / 57% momentum (no analyst data)"
 
         result[t] = {
             "returns":          daily_ret.tolist(),
