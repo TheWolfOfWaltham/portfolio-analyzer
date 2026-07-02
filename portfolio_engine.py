@@ -43,6 +43,50 @@ TICKER_PRIORS = {
 }
 DEFAULT_PRIOR = (0.15, 0.45, 100)
 
+# ── Beta handling for short-history listings ──────────────────────────────────
+MIN_BARS_FOR_BETA = 180   # ~9 months; below this OLS beta is unreliable
+TICKER_BETA_PRIORS = {
+    'SNDK': 2.8,   # SanDisk spinoff Oct 2024 — NAND/AI memory peers
+    'NBIS': 2.5,   # Nebius — GPU cloud, new listing
+    'CEG':  1.2,   # Constellation — regulated utility-adjacent
+}
+
+# ── Market scenarios for beta-driven projections (Option B) ───────────────────
+MARKET_SCENARIOS = {
+    "bull": {"spy": 0.22,  "label": "Bull — AI supercycle holds 3yr",
+             "color": "#2e7d32", "bg": "#e8f5e9"},
+    "base": {"spy": 0.09,  "label": "Base — normal market conditions",
+             "color": "#1565c0", "bg": "#e3f2fd"},
+    "bear": {"spy": -0.15, "label": "Bear — AI capex pause / recession",
+             "color": "#b71c1c", "bg": "#ffebee"},
+}
+
+# ── Smart suggestions candidate DB (fallback when Claude unavailable) ─────────
+SMART_DB = {
+    "AI_OPTICAL":  [("GLW","Corning — optical fiber, AI data-center supply chain","AI Infra Optical",0.55,0.70),
+                    ("COHR","Coherent — optical transceivers, NVDA stake","AI Infra Optical",0.55,0.75),
+                    ("LITE","Lumentum — optical components, AI network","AI Infra Optical",0.48,0.72)],
+    "AI_POWER":    [("GEV","GE Vernova — gas turbines, AI data-center power","Power Infra",0.45,0.42),
+                    ("CEG","Constellation Energy — nuclear PPAs, Microsoft/Walmart","Nuclear Power",0.20,0.35),
+                    ("VST","Vistra — power gen, KKR+NVDA Helix","Power Generation",0.25,0.38),
+                    ("ETR","Entergy — utility, low-vol AI power exposure","Utility",0.12,0.22)],
+    "AI_NETWORK":  [("ANET","Arista Networks — 40%+ EBITDA margin, AI ethernet","AI Networking",0.38,0.45),
+                    ("MRVL","Marvell — custom ASIC, hyperscaler chip design","Custom ASIC",0.65,0.65),
+                    ("AVGO","Broadcom — custom ASIC + networking","Semiconductors",0.40,0.45)],
+    "AI_COMPUTE":  [("SNDK","SanDisk — NAND AI memory, RAM supercycle","Semiconductors",0.80,1.80),
+                    ("NBIS","Nebius — GPU cloud infra, $47B backlog","AI Cloud",0.60,0.85),
+                    ("MU","Micron — DRAM/HBM, AI memory","Semiconductors",0.50,0.70)],
+    "BLUECHIP":    [("WMT","Walmart — defensive retail, low vol","Consumer Staples",0.08,0.18),
+                    ("JPM","JPMorgan — largest US bank, dividend","Financials",0.12,0.22),
+                    ("JNJ","Johnson & Johnson — healthcare, defensive","Healthcare",0.06,0.16),
+                    ("BRK/B","Berkshire Hathaway — Buffett diversified","Conglomerate",0.09,0.15),
+                    ("PG","Procter & Gamble — consumer staples","Consumer Staples",0.07,0.14)],
+    "GROWTH_DIV":  [("NOW","ServiceNow — enterprise SaaS, AI workflow","Enterprise SaaS",-0.05,0.40),
+                    ("SOFI","SoFi — fintech, S&P500 candidate","Fintech",0.10,0.55),
+                    ("CRWD","CrowdStrike — cybersecurity, AI-native","Cybersecurity",0.30,0.50)],
+    "ENERGY_TRANS":[("NEE","NextEra Energy — renewable power, utility","Utilities",0.10,0.20)],
+}
+
 
 def _fetch_analyst_targets(tickers: list) -> dict:
     """
