@@ -16,8 +16,12 @@ load_dotenv()
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 
-RF  = 0.045   # risk-free rate (approx Fed funds)
-ERP = 0.055   # equity risk premium (historical avg)
+ERP = 0.055   # equity risk premium: an assumption (long-run historical average), not market data
+
+
+def current_rf() -> tuple[float, str]:
+    """Live 3-month Treasury yield from Massive, cached for the day."""
+    return md.risk_free()
 CAPM_WEIGHT     = 0.30  # CAPM — stability anchor
 MOMENTUM_WEIGHT = 0.40  # dampened trailing momentum (academic: Jegadeesh-Titman)
 ANALYST_WEIGHT  = 0.30  # Finnhub analyst consensus
@@ -162,8 +166,9 @@ def fetch_returns(tickers: list, budget_s: float = 20) -> dict:
     bars, pending = md.get_many(list(dict.fromkeys(tickers + ["SPY"])), budget_s=budget_s)
     missing = [t for t in tickers if t in bars and len(bars[t]) < 31]
     if "SPY" in pending:
-        return {"data": {}, "pending": pending, "missing": missing, "through": None}
+        return {"data": {}, "pending": pending, "missing": missing, "through": None, "rf": None, "rf_source": None}
 
+    rf, rf_source = current_rf()
     spy_dates, spy_ret = _returns_from_bars(bars["SPY"])
     spy = {"dates": spy_dates, "returns": spy_ret}
     usable = [t for t in tickers if t in bars and len(bars[t]) >= 31]
@@ -182,7 +187,7 @@ def fetch_returns(tickers: list, budget_s: float = 20) -> dict:
             beta_note = f"sector proxy β (only {overlap} days of history)"
         else:
             beta_note = f"OLS vs SPY, {overlap} days"
-        capm_ret = RF + beta * ERP
+        capm_ret = rf + beta * ERP
 
         # Dampened trailing momentum — sqrt(|r|) compresses extremes, capped at ±100%
         if abs(trail_ret) > 0.001:
@@ -218,7 +223,7 @@ def fetch_returns(tickers: list, budget_s: float = 20) -> dict:
             "return_source":    return_source,
             "price":            round(price, 2),
             "price_date":       bars[t][-1][0],
-            "sharpe":           round((blended_ret - RF) / ann_vol, 3) if ann_vol > 0 else 0,
+            "sharpe":           round((blended_ret - rf) / ann_vol, 3) if ann_vol > 0 else 0,
             "data_source":      f"Massive daily bars through {bars[t][-1][0]}",
             "n_days":           len(daily_ret),
         }
@@ -227,7 +232,7 @@ def fetch_returns(tickers: list, budget_s: float = 20) -> dict:
 
     through = max((v["price_date"] for v in result.values()), default=None)
     return {"data": result, "pending": [t for t in pending if t != "SPY"], "missing": missing,
-            "through": through}
+            "through": through, "rf": rf, "rf_source": rf_source}
 
 
 # ── Portfolio math ────────────────────────────────────────────────────────────
@@ -237,7 +242,8 @@ def build_cov(tickers: list, data: dict) -> np.ndarray:
     return np.cov(aligned_matrix(tickers, data)) * 252
 
 
-def portfolio_stats(weights, mu, cov, rf: float = RF):
+def portfolio_stats(weights, mu, cov, rf: float | None = None):
+    rf       = current_rf()[0] if rf is None else rf
     w        = np.array(weights)
     port_ret = float(w @ mu)
     port_vol = float(np.sqrt(w @ cov @ w))
@@ -245,7 +251,8 @@ def portfolio_stats(weights, mu, cov, rf: float = RF):
     return port_ret, port_vol, sharpe
 
 
-def optimize(mu, cov, mode: str = "sharpe", rf: float = RF) -> list:
+def optimize(mu, cov, mode: str = "sharpe", rf: float | None = None) -> list:
+    rf  = current_rf()[0] if rf is None else rf
     mu  = np.array(mu)
     n   = len(mu)
     w0  = np.ones(n) / n
@@ -292,7 +299,7 @@ def efficient_frontier(mu, cov, n_points: int = 40) -> list:
 def monte_carlo(port_ret: float, port_vol: float, capital: float,
                 n_paths: int = 200, years: int = 3) -> list:
     dt    = 1 / 252
-    mu_g  = port_ret - 0.5 * port_vol ** 2
+    mu_g  = float(np.log1p(port_ret)) - 0.5 * port_vol ** 2   # simple expected return -> log drift
     sig   = port_vol * np.sqrt(dt)
     steps = int(252 * years)
     np.random.seed(42)
@@ -305,6 +312,30 @@ def monte_carlo(port_ret: float, port_vol: float, capital: float,
             path.append(round(v, 2))
         monthly.append([path[min(k * 21, steps)] for k in range(37)])
     return monthly
+
+
+def portfolio_summary(port_ret, port_vol, sharpe, hist_dd=None) -> dict:
+    """Headline numbers. Loss figures use log returns, so no figure can fall below -100%."""
+    mu_g = float(np.log1p(port_ret)) - 0.5 * port_vol ** 2    # median log return per year (lognormal)
+    return {
+        'ann_ret':       round(port_ret*100, 1),
+        'ann_vol':       round(port_vol*100, 1),
+        'sharpe':        round(sharpe, 2),
+        'port_3yr_geom': round(float(np.expm1(3 * mu_g)) * 100, 1),
+        'var_95':        round(float(np.expm1(mu_g - 1.645 * port_vol)) * 100, 1),   # 1-year, 95%
+        'max_dd_est':    round(float(np.expm1(-2.5 * port_vol)) * 100, 1),         # 2.5-sigma log move
+        'max_dd_hist':   round(hist_dd * 100, 1) if hist_dd is not None else None,
+    }
+
+
+def historical_drawdown(tickers, weights, data):
+    """Worst peak-to-trough loss of these weights over the lookback, rebalanced daily, real returns."""
+    R = aligned_matrix(tickers, data)
+    if R.shape[1] < 2:
+        return None
+    wealth = np.cumprod(1 + np.array(weights) @ R)
+    peak = np.maximum.accumulate(np.concatenate([[1.0], wealth]))[1:]
+    return float((wealth / peak - 1).min())
 
 
 def risk_contributions(weights, cov) -> list:
@@ -325,12 +356,14 @@ def _fv_annuity(pmt: float, r_ann: float, n_per_yr: int, years: int) -> float:
     return pmt * ((1 + r) ** n - 1) / r
 
 
-def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, data) -> dict:
+def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, data, rf=None) -> dict:
     """
-    Beta-driven scenario analysis (Option B).
-    Each stock's annual return = RF + beta × (market_return - RF).
+    Beta-driven scenario analysis. Each stock's log return = log(1+rf) + beta x (log(1+market) - log(1+rf)).
+    Working in log returns keeps a high-beta stock above -100% a year in a falling market, where the
+    simple-return version (rf + beta x (market - rf)) can imply losing more than everything.
     Market scenarios: Bull SPY+22%, Base SPY+9%, Bear SPY-15%.
     """
+    rf = current_rf()[0] if rf is None else rf
     results = {}
     for key, scen in MARKET_SCENARIOS.items():
         spy_ret = scen["spy"]
@@ -340,7 +373,8 @@ def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, da
 
         for t, w in zip(tickers, weights):
             beta  = data[t].get("beta", 1.0)
-            ann_r = RF + beta * (spy_ret - RF)   # CAPM stock return under this scenario
+            log_r = np.log1p(rf) + beta * (np.log1p(spy_ret) - np.log1p(rf))
+            ann_r = float(np.expm1(log_r))
             alloc = w * initial_capital
             pmt   = biweekly_contrib * w
 
@@ -348,11 +382,9 @@ def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, da
             fv  = [_fv_annuity(pmt, ann_r, 26, yr) for yr in [1, 2, 3]]
             yr3_val = vi[2] + fv[2]
 
-            total_biweekly_3yr = pmt * 26 * 3
-            total_invested     = alloc + total_biweekly_3yr
-            contrib_adj_pct    = round((yr3_val - total_invested) / total_invested * 100, 1) \
-                                 if total_invested > 0 else 0
-            initial_only_pct   = round((yr3_val - alloc) / alloc * 100, 1) if alloc > 0 else 0
+            total_invested   = alloc + pmt * 26 * 3
+            contrib_adj_pct  = round((yr3_val - total_invested) / total_invested * 100, 1) if total_invested > 0 else 0
+            initial_only_pct = round((vi[2] - alloc) / alloc * 100, 1) if alloc > 0 else 0   # initial capital alone
 
             rows.append({
                 "ticker": t, "weight": round(w*100,1), "init": round(alloc,0),
@@ -372,12 +404,14 @@ def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, da
         for k in tots:
             tots[k] = round(tots[k], 0)
         total_invested_port = initial_capital + biweekly_contrib * 26 * 3
+        port_pct = round((tots["yr3"]-total_invested_port)/total_invested_port*100,1) if total_invested_port else 0
         results[key] = {
             "label": scen["label"], "color": scen["color"], "bg": scen["bg"],
             "spy_scenario": f"S&P 500 {'+' if spy_ret>=0 else ''}{spy_ret*100:.0f}%/yr",
             "rows": rows, "totals": tots,
-            "total_return_pct": round((tots["yr3"]-initial_capital)/initial_capital*100,1),
-            "contrib_adj_pct": round((tots["yr3"]-total_invested_port)/total_invested_port*100,1),
+            "initial_only_pct": round((tots["yr3_init"]-initial_capital)/initial_capital*100,1) if initial_capital else 0,
+            "total_return_pct": port_pct,
+            "contrib_adj_pct": port_pct,
         }
     return results
 
@@ -385,7 +419,8 @@ def scenario_projections(tickers, weights, initial_capital, biweekly_contrib, da
 # ── Smart suggestions ─────────────────────────────────────────────────────────
 
 def marginal_impact(existing_tickers, existing_weights, existing_data,
-                    candidate_ticker, candidate_data, add_pct=0.05, rf=RF):
+                    candidate_ticker, candidate_data, add_pct=0.05, rf=None):
+    rf = current_rf()[0] if rf is None else rf
     w_curr   = np.array(existing_weights, dtype=float)
     w_curr   = w_curr / w_curr.sum()
     mu_curr  = np.array([existing_data[t]['ann_ret'] for t in existing_tickers])

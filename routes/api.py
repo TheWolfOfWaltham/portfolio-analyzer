@@ -4,7 +4,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from portfolio_engine import (fetch_returns, build_cov, optimize, efficient_frontier,
                                monte_carlo, risk_contributions, portfolio_stats,
                                scenario_projections, smart_suggestions_v2, score_candidates,
-                               exposure_warnings)
+                               exposure_warnings, portfolio_summary, historical_drawdown,
+                               current_rf, ERP)
 import market_data as md
 from dotenv import load_dotenv
 import numpy as np
@@ -179,16 +180,20 @@ def analyze():
         return jsonify({'error': msg}), 400
 
     tickers  = list(data.keys())
+    rf       = fetched['rf']
     mu       = np.array([data[t]['ann_ret'] for t in tickers])
     cov      = build_cov(tickers, data)
-    weights  = optimize(mu.tolist(), cov, mode)
-    port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov)
+    weights  = optimize(mu.tolist(), cov, mode, rf)
+    port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov, rf)
     rc       = risk_contributions(weights, cov)
+    hist_dd  = historical_drawdown(tickers, weights, data)
     sectors  = _sectors(tickers)
     exposure = _exposure(tickers, weights, sectors)
 
+    sources = sorted({data[t]['return_source'] for t in tickers})
     data_note = (f"Live data: Massive daily closes through {fetched['through']}. Vol, beta and covariance "
-                 f"from real returns on shared trading days. Returns = {data[tickers[0]]['return_source']}.")
+                 f"from real returns on shared trading days. Returns = {' / '.join(sources)}. "
+                 f"CAPM uses rf {rf*100:.2f}% ({fetched['rf_source']}) and an assumed {ERP*100:.1f}% equity risk premium.")
     if missing:
         data_note += f" Excluded, no price history: {', '.join(missing)}."
 
@@ -215,17 +220,10 @@ def analyze():
         'tickers':   tickers,
         'weights':   [round(w*100,1) for w in weights],
         'positions': positions,
-        'portfolio': {
-            'ann_ret':       round(port_ret*100,1),
-            'ann_vol':       round(port_vol*100,1),
-            'sharpe':        round(sharpe,2),
-            'port_3yr_geom': round(((1+port_ret-0.5*port_vol**2)**3-1)*100,1),
-            'var_95':        round(-1.645*port_vol*100,1),
-            'max_dd_est':    round(-2.5*port_vol*100,1),
-        },
+        'portfolio': portfolio_summary(port_ret, port_vol, sharpe, hist_dd),
         'frontier':  efficient_frontier(mu.tolist(), cov),
         'mc_paths':  monte_carlo(port_ret, port_vol, capital),
-        'scenarios': scenario_projections(tickers, weights, capital, biweekly, data),
+        'scenarios': scenario_projections(tickers, weights, capital, biweekly, data, rf),
         'cov_matrix': cov.tolist(),
         'sectors':   sectors,
         'exposure':  exposure,
@@ -233,6 +231,7 @@ def analyze():
         'biweekly':  biweekly,
         'mode':      mode,
         'is_live':   True,
+        'rf':        round(rf*100, 2),
         'missing':   missing,
         'data_note': data_note,
     })
@@ -310,9 +309,9 @@ def recalculate():
         cov = np.array(cov_flat)
         mu  = np.array([overrides.get(t, 10.0) / 100.0 for t in tickers])
 
-        weights  = optimize(mu.tolist(), cov, mode)
-        port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov)
-        rc = risk_contributions(weights, cov)
+        rf, _    = current_rf()
+        weights  = optimize(mu.tolist(), cov, mode, rf)
+        port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov, rf)
 
         # Reconstruct minimal data dict for scenario_projections (needs beta)
         data_stub = {t: {'ann_ret': mu[i], 'ann_vol': 0.5,
@@ -322,17 +321,11 @@ def recalculate():
         return jsonify({
             'tickers':   tickers,
             'weights':   [round(w*100,1) for w in weights],
-            'portfolio': {
-                'ann_ret':       round(port_ret*100,1),
-                'ann_vol':       round(port_vol*100,1),
-                'sharpe':        round(sharpe,2),
-                'port_3yr_geom': round(((1+port_ret-0.5*port_vol**2)**3-1)*100,1),
-                'var_95':        round(-1.645*port_vol*100,1),
-                'max_dd_est':    round(-2.5*port_vol*100,1),
-            },
+            'portfolio': portfolio_summary(port_ret, port_vol, sharpe),
             'frontier':  efficient_frontier(mu.tolist(), cov),
             'mc_paths':  monte_carlo(port_ret, port_vol, capital),
-            'scenarios': scenario_projections(tickers, weights, capital, biweekly, data_stub),
+            'scenarios': scenario_projections(tickers, weights, capital, biweekly, data_stub, rf),
+            'rf':        round(rf*100, 2),
             'rc':        risk_contributions(weights, cov),
         })
     except Exception as ex:

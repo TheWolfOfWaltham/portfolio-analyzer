@@ -303,3 +303,30 @@ def cache_status() -> list[dict]:
         out.append({"ticker": e.get("ticker"), "n": len(bars), "first": bars[0][0] if bars else None,
                     "last": bars[-1][0] if bars else None, "fetched_at": e.get("fetched_at"), "fresh": _fresh(e)})
     return out
+
+
+# ── Risk-free rate: latest 3-month Treasury yield, refreshed once a day ───────────────────────
+
+def risk_free(wait_max: float = 10) -> tuple[float, str]:
+    """(rate as a decimal, description). Uses yesterday's cached yield if today's fetch is not possible."""
+    path = CACHE_DIR / "treasury_3m.json"
+    try:
+        cached = json.loads(path.read_text())
+    except (FileNotFoundError, ValueError):
+        cached = None
+    today = dt.datetime.now(ET).date().isoformat()
+    if cached and cached.get("checked") == today:
+        return cached["rate"], f"3-month Treasury, {cached['date']}"
+    try:
+        body = _get("/fed/v1/treasury-yields", {"sort": "date.desc", "limit": 1}, wait_max)
+        row = (body.get("results") or [{}])[0]
+        y = row.get("yield_3_month")
+        if y is not None:
+            rate = float(y) / 100.0 if float(y) > 1.0 else float(y)    # published in percent
+            path.write_text(json.dumps({"rate": rate, "date": row.get("date"), "checked": today}))
+            return rate, f"3-month Treasury, {row.get('date')}"
+    except MassiveError as ex:
+        print(f"[massive] treasury fetch failed: {ex}")
+    if cached:
+        return cached["rate"], f"3-month Treasury, {cached['date']} (cached)"
+    raise MassiveError("Could not load the 3-month Treasury yield from Massive.")

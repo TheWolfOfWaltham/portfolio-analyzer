@@ -1,10 +1,10 @@
 # Portfolio Analyzer — AI Infrastructure
 
-A quantitative portfolio analysis web app built with Python Flask. Enter any tickers and your capital, and get institutional-grade risk analytics computed live from Yahoo Finance data.
+A quantitative portfolio analysis web app built with Python Flask. Enter any tickers and your capital, and get institutional-grade risk analytics computed from Massive end-of-day price data.
 
 ## Features
 
-- **Live market data** via `yfinance` — real 1-year daily returns for every ticker
+- **Market data** from Massive daily bars, cached once per trading day. Tickers without real history are excluded, never estimated
 - **Mean-Variance Optimization** — Max Sharpe, Min Volatility, Risk Parity modes
 - **Efficient Frontier** — scatter plot of the optimal risk/return tradeoff curve
 - **Monte Carlo Simulation** — 200 paths, 3-year horizon, with 5th/25th/median/75th/95th percentile bands

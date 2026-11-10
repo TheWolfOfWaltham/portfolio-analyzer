@@ -235,12 +235,12 @@ function renderRiskPanel(d, extraRisks){
   if(p.max_dd_est<-60){
     risks.push({
       header:'Drawdown Risk: Extreme downside exposure',
-      body:'Estimated max drawdown of '+p.max_dd_est+'% under a 2.5σ stress scenario. Consider adding low-beta defensive positions (WMT, JNJ, BRK/B) to reduce tail risk.'
+      body:'Estimated drawdown of '+p.max_dd_est+'% in a 2.5σ down year'+(p.max_dd_hist!=null?' (these weights fell '+p.max_dd_hist+'% peak to trough over the past year)':'')+'. Consider adding low-beta defensive positions (WMT, JNJ, BRK/B) to reduce tail risk.'
     });
   } else if(p.max_dd_est<-40){
     risks.push({
       header:'Drawdown Risk: High downside in stress scenarios',
-      body:'Estimated max drawdown of '+p.max_dd_est+'%. Adding 10-15% in low-vol blue-chips could reduce this materially without sacrificing core AI upside.'
+      body:'Estimated drawdown of '+p.max_dd_est+'% in a 2.5σ down year'+(p.max_dd_hist!=null?' (past year, peak to trough: '+p.max_dd_hist+'%)':'')+'. Adding 10-15% in low-vol blue-chips could reduce this materially without sacrificing core AI upside.'
     });
   }
   if(aiPct>65){
@@ -302,9 +302,9 @@ function renderKPIs(d){
   document.getElementById('kpiStrip').innerHTML=
     '<div class="kpi kpi-green"><div class="kpi-label">Exp. Annual Return</div><div class="kpi-val">'+p.ann_ret+'%</div><div class="kpi-sub">forward estimate</div></div>'+
     '<div class="kpi"><div class="kpi-label">Portfolio Volatility</div><div class="kpi-val" style="color:var(--text)">'+p.ann_vol+'%</div><div class="kpi-sub">annualized</div></div>'+
-    '<div class="kpi kpi-purple"><div class="kpi-label">Sharpe Ratio</div><div class="kpi-val">'+p.sharpe+'</div><div class="kpi-sub">rf = 4.5%</div></div>'+
-    '<div class="kpi kpi-green"><div class="kpi-label">3yr Compounded</div><div class="kpi-val">+'+p.port_3yr_geom+'%</div><div class="kpi-sub">geometric mean</div></div>'+
-    '<div class="kpi kpi-red"><div class="kpi-label">Est. Max Drawdown</div><div class="kpi-val">'+p.max_dd_est+'%</div><div class="kpi-sub">2.5\u03c3 stress</div></div>'+
+    '<div class="kpi kpi-purple"><div class="kpi-label">Sharpe Ratio</div><div class="kpi-val">'+p.sharpe+'</div><div class="kpi-sub">rf = '+(d.rf!=null?d.rf+'%':'n/a')+'</div></div>'+
+    '<div class="kpi kpi-green"><div class="kpi-label">3yr Compounded</div><div class="kpi-val">'+((+p.port_3yr_geom)>=0?'+':'')+p.port_3yr_geom+'%</div><div class="kpi-sub">median outcome</div></div>'+
+    '<div class="kpi kpi-red"><div class="kpi-label">Est. Max Drawdown</div><div class="kpi-val">'+p.max_dd_est+'%</div><div class="kpi-sub">2.5\u03c3 stress'+(p.max_dd_hist!=null?' · past year: '+p.max_dd_hist+'%':'')+'</div></div>'+
     '<div class="kpi kpi-purple"><div class="kpi-label">Roth IRA — 3yr Est.</div><div class="kpi-val" style="font-size:18px">$'+Math.round(roth3yrFV).toLocaleString()+'</div><div class="kpi-sub">DCA @ portfolio return</div></div>';
 }
 
@@ -432,18 +432,18 @@ function renderScenarios(d){
   document.getElementById('scenarioGrid').innerHTML=order.map(key=>{
     const s=d.scenarios[key];
     const contribAdjRet=totalInvested>0?((s.totals.yr3-totalInvested)/totalInvested*100).toFixed(1):0;
-    const initOnlyRet=d.capital>0?((s.totals.yr3-d.capital)/d.capital*100).toFixed(1):0;
+    const initOnlyRet=(s.initial_only_pct!=null?s.initial_only_pct:(d.capital>0?((s.totals.yr3_init-d.capital)/d.capital*100).toFixed(1):0));
     const adjColor=+contribAdjRet>=0?s.color:'var(--red)';
     return '<div class="scenario-card sc-'+key+'">'+
       '<div class="sc-label" style="color:'+s.color+'">'+s.label+'</div>'+
       '<div class="sc-total" style="color:'+s.color+'">$'+s.totals.yr3.toLocaleString()+'</div>'+
       '<div class="sc-sub" style="color:'+adjColor+';opacity:1;font-weight:700">'+(+contribAdjRet>=0?'+':'')+contribAdjRet+'% on all capital deployed</div>'+
-      '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;font-family:\'DM Mono\',monospace">(+'+(+initOnlyRet>=0?'+':'')+initOnlyRet+'% on initial only)</div>'+
+      '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px;font-family:\'DM Mono\',monospace">('+((+initOnlyRet)>=0?'+':'')+initOnlyRet+'% on initial capital alone)</div>'+
       '<div class="sc-rows">'+
       '<div class="sc-row"><span class="sc-row-lbl">Year 1</span><span style="color:'+s.color+';font-weight:800">$'+s.totals.yr1.toLocaleString()+'</span></div>'+
       '<div class="sc-row"><span class="sc-row-lbl">Year 2</span><span style="color:'+s.color+';font-weight:800">$'+s.totals.yr2.toLocaleString()+'</span></div>'+
       '<div class="sc-row"><span class="sc-row-lbl">Year 3</span><span style="color:'+s.color+';font-weight:800">$'+s.totals.yr3.toLocaleString()+'</span></div>'+
-      '</div><div class="sc-contrib">DCA contributions: +$'+s.totals.yr3_contrib.toLocaleString()+'</div></div>';
+      '</div><div class="sc-contrib">Value of DCA contributions: $'+s.totals.yr3_contrib.toLocaleString()+' ($'+Math.round(d.biweekly*26*3).toLocaleString()+' paid in)</div></div>';
   }).join('');
 }
 
@@ -471,9 +471,8 @@ function renderPositionTable(d){
     const isLive=p.data_source&&!p.data_source.includes('PRIOR');
     const srcBadge=isLive?'<span class="source-badge source-live">live</span>':'<span class="source-badge source-prior">prior</span>';
     const hasFMP=p.analyst_target&&p.analyst_implied!==null&&p.analyst_implied!==undefined;
-    const blendLabel=hasFMP
-      ?'<span style="font-size:9px;color:var(--purple-mid);font-weight:600">70% analyst / 30% CAPM</span>'
-      :'<span style="font-size:9px;color:var(--text-faint);font-weight:600">CAPM only</span>';
+    const blendLabel='<span style="font-size:9px;color:'+(hasFMP?'var(--purple-mid)':'var(--text-faint)')+
+      ';font-weight:600">'+(p.return_source||'')+'</span>';
     const analystNote=hasFMP
       ?'<div style="font-size:9px;color:var(--text-dim);font-family:\'DM Mono\',monospace">target $'+(p.analyst_target||0).toFixed(2)+' → '+p.analyst_implied+'%</div>':'';
     const blended=p.blended_return||p.ann_ret||0;
@@ -551,7 +550,7 @@ function buildScenarioTable(key,s){
   // Portfolio-level contrib-adjusted return
   const totalInvested=sumInit+sumBwk*26*3;
   const portAdjRet=totalInvested>0?((s.totals.yr3-totalInvested)/totalInvested*100).toFixed(1):0;
-  const portInitRet=sumInit>0?((s.totals.yr3-sumInit)/sumInit*100).toFixed(1):0;
+  const portInitRet=sumInit>0?((s.totals.yr3_init-sumInit)/sumInit*100).toFixed(1):0;
   const adjColor=+portAdjRet>=0?'var(--green)':'var(--red)';
 
   const sumRow='<tr style="background:rgba(107,58,255,.07);border-top:1px solid rgba(107,58,255,.25)">'+
@@ -564,7 +563,7 @@ function buildScenarioTable(key,s){
     '<td style="font-weight:800;color:'+s.color+'">$'+s.totals.yr3.toLocaleString()+'</td>'+
     '<td style="font-weight:800;color:'+adjColor+'">'+
       (+portAdjRet>=0?'+':'')+portAdjRet+'%'+
-      '<span style="font-size:10px;color:var(--text-dim);font-weight:400"> (+'+(+portInitRet>=0?'+':'')+portInitRet+'% on init)</span>'+
+      '<span style="font-size:10px;color:var(--text-dim);font-weight:400"> ('+((+portInitRet)>=0?'+':'')+portInitRet+'% on init)</span>'+
     '</td>'+
     '</tr>';
 
@@ -880,7 +879,7 @@ async function runRecalculate(){
         cov_matrix: lastCovMatrix,
         betas: lastBetas,
         capital: +document.getElementById('capital').value,
-        biweekly: +document.getElementById('biweekly').value,
+        biweekly: FREQ[currentFreq].toAnnual(+document.getElementById('biweekly').value) / 26,
         mode: currentMode,
       })
     });
@@ -888,7 +887,7 @@ async function runRecalculate(){
     if(data.error){ showStatus(data.error,true); return; }
     hideStatus();
     // Merge updated portfolio stats back into lastPositionData for re-renders
-    const merged={...lastPositionData, portfolio:data.portfolio,
+    const merged={...lastPositionData, portfolio:data.portfolio, rf:data.rf,
       frontier:data.frontier, mc_paths:data.mc_paths,
       scenarios:data.scenarios, weights:data.weights};
     renderKPIs(merged); renderHeroBubbles(merged);
