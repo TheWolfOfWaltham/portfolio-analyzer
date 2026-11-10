@@ -598,6 +598,7 @@ async function runSmart(){
     const res=await fetch('/api/smart',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tickers,weights:tickers.map(()=>1/tickers.length),user_prompt:prompt})});
     const data=await res.json();
+    if(data.error){ showStatus(data.error,true); return; }
     hideStatus();
     renderSmart(data);
   } catch(e){ showStatus('Could not load suggestions: '+e.message,true); }

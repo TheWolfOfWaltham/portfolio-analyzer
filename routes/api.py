@@ -3,10 +3,9 @@ import sys, os, json, requests as req
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from portfolio_engine import (fetch_returns, build_cov, optimize, efficient_frontier,
                                monte_carlo, risk_contributions, portfolio_stats,
-                               scenario_projections, smart_suggestions_v2,
-                               marginal_impact, _simulated_returns, _fetch_alpaca,
-                               TICKER_PRIORS, DEFAULT_PRIOR, RF, ERP,
-                               CAPM_WEIGHT, MOMENTUM_WEIGHT, ANALYST_WEIGHT)
+                               scenario_projections, smart_suggestions_v2, score_candidates,
+                               exposure_warnings)
+import market_data as md
 from dotenv import load_dotenv
 import numpy as np
 
@@ -126,36 +125,32 @@ Return ONLY valid JSON (no markdown, no preamble):
 
 
 def _enrich_with_impact(claude_result, tickers, weights, data):
-    def enrich(items, kind):
+    """Scores Claude's picks on real price history. Its own return and vol guesses are discarded."""
+    def candidates(items, kind):
         out = []
         for s in items:
             t = s.get('ticker','').upper()
-            if not t: continue
-            ann_r = s.get('exp_return', 0.15)
-            ann_v = s.get('ann_vol',    0.40)
-            _, prior_vol, prior_price = TICKER_PRIORS.get(t, DEFAULT_PRIOR)
-            cand_data = {
-                'returns':  _simulated_returns(t).tolist(),
-                'ann_ret':  RF + 1.0 * ERP,   # CAPM with beta=1 for candidates
-                'ann_vol':  ann_v,
-                'beta':     1.0,
-                'price':    prior_price,
-                'sharpe':   round((RF + ERP - RF) / ann_v, 3) if ann_v else 0,
-            }
-            impact = (marginal_impact(tickers, weights, data, t, cand_data)
-                      if data and len(data) >= 2
-                      else {'sharpe_delta':0,'vol_delta':0,'ret_delta':0,
-                             'corr_to_book':0.25,'new_sharpe':0,'new_vol':0,'new_ret':0})
-            out.append({
-                'ticker': t, 'desc': s.get('company','') + ' — ' + s.get('why_now',''),
-                'sector': s.get('sector','Other'), 'rationale': s.get('rationale',''),
-                'exp_return': ann_r, 'ann_vol': ann_v, 'type': kind, **impact,
-            })
+            if t:
+                out.append({'ticker': t, 'desc': s.get('company','') + ' — ' + s.get('why_now',''),
+                            'sector': s.get('sector','Other'), 'rationale': s.get('rationale',''),
+                            'type': kind})
         return out
 
-    return (enrich(claude_result.get('sharpe_enhancers',[]), 'complement'),
-            enrich(claude_result.get('vol_reducers',[]),     'diversifier'),
-            claude_result.get('portfolio_analysis',''))
+    sharpe_c = candidates(claude_result.get('sharpe_enhancers',[]), 'complement')
+    vol_c    = candidates(claude_result.get('vol_reducers',[]),     'diversifier')
+    scored, pending = score_candidates(tickers, weights, data, sharpe_c + vol_c)
+    return ([x for x in scored if x['type']=='complement'],
+            [x for x in scored if x['type']=='diversifier'],
+            claude_result.get('portfolio_analysis',''), pending)
+
+
+def _loading_response(pending):
+    eta = md.eta_seconds(len(pending))
+    mins = max(1, round(eta / 60))
+    return jsonify({'error': f"Loading price history for {', '.join(pending)}. The free data tier allows "
+                             f"5 requests a minute, so this takes about {mins} minute{'s' if mins != 1 else ''}. "
+                             "Press Analyze again then.",
+                    'pending': pending, 'retry_after': eta}), 503
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -170,9 +165,18 @@ def analyze():
     if len(tickers) < 2:
         return jsonify({'error': 'Add at least 2 tickers.'}), 400
 
-    data, is_live = fetch_returns(tickers)
+    try:
+        fetched = fetch_returns(tickers)
+    except md.MassiveError as ex:
+        return jsonify({'error': str(ex)}), 502
+    if fetched['pending']:
+        return _loading_response(fetched['pending'])
+    data, missing = fetched['data'], fetched['missing']
     if len(data) < 2:
-        return jsonify({'error': 'Could not load data.'}), 400
+        msg = 'Fewer than 2 tickers have price history.'
+        if missing:
+            msg += f" No daily bars found for: {', '.join(missing)}."
+        return jsonify({'error': msg}), 400
 
     tickers  = list(data.keys())
     mu       = np.array([data[t]['ann_ret'] for t in tickers])
@@ -183,13 +187,10 @@ def analyze():
     sectors  = _sectors(tickers)
     exposure = _exposure(tickers, weights, sectors)
 
-    live_sources = {t: data[t].get('data_source','') for t in tickers}
-    any_prior = any('PRIOR' in v for v in live_sources.values())
-    data_note = ('Live data: vol/beta from price bars, returns = 30% CAPM + 40% momentum + 30% analyst (Finnhub)'
-                 if is_live and not any_prior
-                 else 'Partial live data — blended returns where available, CAPM fallback for missing tickers'
-                 if is_live
-                 else 'Simulated — add FINNHUB_API_KEY + yfinance/Alpaca keys to Railway for live data')
+    data_note = (f"Live data: Massive daily closes through {fetched['through']}. Vol, beta and covariance "
+                 f"from real returns on shared trading days. Returns = {data[tickers[0]]['return_source']}.")
+    if missing:
+        data_note += f" Excluded, no price history: {', '.join(missing)}."
 
     positions = [{
         'ticker':          t,
@@ -231,7 +232,8 @@ def analyze():
         'capital':   capital,
         'biweekly':  biweekly,
         'mode':      mode,
-        'is_live':   is_live,
+        'is_live':   True,
+        'missing':   missing,
         'data_note': data_note,
     })
 
@@ -243,29 +245,47 @@ def smart():
     weights     = body.get('weights', [1/max(len(tickers),1)]*len(tickers))
     user_prompt = body.get('user_prompt', '').strip()
 
-    data, _ = fetch_returns(tickers) if tickers else ({}, False)
-    sectors  = _sectors(tickers) if tickers else {}
-    exposure = _exposure(tickers, weights, sectors) if tickers else {}
+    if len(tickers) < 2:
+        return jsonify({'error': 'Add at least 2 tickers.'}), 400
+    try:
+        fetched = fetch_returns(tickers)
+    except md.MassiveError as ex:
+        return jsonify({'error': str(ex)}), 502
+    if fetched['pending']:
+        return _loading_response(fetched['pending'])
+    data = fetched['data']
+    if len(weights) != len(tickers):
+        weights = [1/len(tickers)] * len(tickers)
+    pairs = [(t, w) for t, w in zip(tickers, weights) if t in data]
+    if len(pairs) < 2:
+        return jsonify({'error': 'Fewer than 2 tickers have price history.'}), 400
+    tickers, weights = [p[0] for p in pairs], [float(p[1]) for p in pairs]
+    sectors  = _sectors(tickers)
+    exposure = _exposure(tickers, weights, sectors)
 
     claude_result = _call_claude(tickers, weights, sectors, exposure, user_prompt)
 
     if claude_result:
-        sharpe_e, vol_r, analysis = _enrich_with_impact(claude_result, tickers, weights, data)
-        fallback = smart_suggestions_v2(tickers, weights, data)
+        sharpe_e, vol_r, analysis, pending = _enrich_with_impact(claude_result, tickers, weights, data)
+        warnings, _ = exposure_warnings(tickers, weights)
+        if pending:
+            warnings.append(f"Still loading price history for {', '.join(pending)}; "
+                            "those picks appear once it arrives.")
         return jsonify({
             'sharpe_enhancers':   sharpe_e,
             'vol_reducers':       vol_r,
-            'warnings':           fallback.get('warnings', []),
+            'warnings':           warnings,
             'portfolio_analysis': analysis,
             'powered_by':         'claude',
         })
 
     result = smart_suggestions_v2(tickers, weights, data)
+    if result.get('pending'):
+        result['warnings'].append(f"Still loading price history for {', '.join(result['pending'])}; "
+                                  "those candidates appear once it arrives.")
     result['powered_by']         = 'database'
     result['portfolio_analysis'] = ''
     return jsonify(result)
-
-
 
 
 @api_bp.route('/recalculate', methods=['POST'])
@@ -320,134 +340,49 @@ def recalculate():
 
 @api_bp.route('/market-data', methods=['GET'])
 def market_data():
-    """Previous-day OHLCV for Nasdaq 100 banner tickers via Alpaca."""
+    """Last close and daily change for the Nasdaq 100 banner, from Massive's daily market summary."""
     NDX50 = ['AAPL','MSFT','NVDA','AMZN','GOOG','META','TSLA','AVGO','NFLX','COST',
              'AMD','QCOM','ADBE','TXN','AMGN','CSCO','SBUX','GILD','PANW','LRCX',
              'AMAT','KLAC','REGN','ADP','BKNG','MRVL','CRWD','DDOG','TEAM','ZS',
              'WDAY','ABNB','FTNT','CDNS','SNPS','ORLY','CTAS','PCAR','MNST','EA',
              'BIIB','IDXX','ANSS','HON','PEP','INTC','MDLZ','ADI','VRTX','FISV']
 
-    ALPACA_KEY_    = os.environ.get('ALPACA_API_KEY', '')
-    ALPACA_SECRET_ = os.environ.get('ALPACA_SECRET_KEY', '')
-
-    if not ALPACA_KEY_ or not ALPACA_SECRET_:
-        return jsonify({'tickers': [], 'error': 'No Alpaca keys'}), 200
-
-    end   = __import__('datetime').date.today()
-    start = end - __import__('datetime').timedelta(days=5)
     try:
-        r = __import__('requests').get(
-            'https://data.alpaca.markets/v2/stocks/bars',
-            headers={'APCA-API-KEY-ID': ALPACA_KEY_,
-                     'APCA-API-SECRET-KEY': ALPACA_SECRET_,
-                     'Accept': 'application/json'},
-            params={'symbols': ','.join(NDX50), 'timeframe': '1Day',
-                    'start': start.isoformat(), 'end': end.isoformat(),
-                    'limit': 10, 'sort': 'desc'},
-            timeout=15
-        )
-        if r.status_code != 200:
-            return jsonify({'tickers': [], 'error': f'Alpaca {r.status_code}'}), 200
-
-        bars = r.json().get('bars', {})
-        result = []
-        for t in NDX50:
-            t_bars = bars.get(t, [])
-            if len(t_bars) >= 2:
-                prev = t_bars[1]  # previous day (sorted desc)
-                curr = t_bars[0]
-                chg  = (curr['c'] - prev['c']) / prev['c'] * 100
-                result.append({'ticker': t, 'price': round(curr['c'],2),
-                                'change': round(chg,2), 'prev': round(prev['c'],2)})
-            elif len(t_bars) == 1:
-                b = t_bars[0]
-                chg = (b['c'] - b['o']) / b['o'] * 100
-                result.append({'ticker': t, 'price': round(b['c'],2),
-                                'change': round(chg,2), 'prev': round(b['o'],2)})
-        return jsonify({'tickers': result})
-    except Exception as ex:
+        sessions = md.last_two_sessions()
+    except md.MassiveError as ex:
         return jsonify({'tickers': [], 'error': str(ex)}), 200
+    if not sessions:
+        return jsonify({'tickers': [], 'error': 'Daily summary not available yet'}), 200
+    curr = sessions[0][1]
+    prev = sessions[1][1] if len(sessions) > 1 else {}
+    result = []
+    for t in NDX50:
+        c = curr.get(t)
+        if not c or not c.get('c'):
+            continue
+        p = (prev.get(t) or {}).get('c') or c.get('o')
+        result.append({'ticker': t, 'price': round(c['c'], 2),
+                       'change': round((c['c'] - p) / p * 100, 2), 'prev': round(p, 2)})
+    return jsonify({'tickers': result, 'as_of': sessions[0][0].isoformat()})
 
 
 @api_bp.route('/debug', methods=['GET'])
 def debug():
-    """Shows Alpaca connection status and real computed stats for portfolio tickers."""
-    from portfolio_engine import _compute_beta
-    PORT = ['GLW','SNDK','NBIS','GEV','MRVL','COHR','ANET','VST','NOW']
-    all_t = PORT + ['SPY']
-    raw, status = _fetch_alpaca(all_t, days=365)
-
-    spy_bars = raw.get('SPY', [])
-    spy_ret  = np.array([])
-    if spy_bars and len(spy_bars) >= 30:
-        sc      = np.array([b['c'] for b in spy_bars], float)
-        spy_ret = np.diff(sc) / sc[:-1]
-
-    rows = []
-    for t in PORT:
-        bars = raw.get(t, [])
-        live = bars and len(bars) >= 30
-        if live:
-            closes  = np.array([b['c'] for b in bars], float)
-            dr      = np.diff(closes) / closes[:-1]
-            vol     = float(dr.std() * np.sqrt(252))
-            trail   = float((1 + dr.mean())**252 - 1)
-            price   = float(closes[-1])
-            beta    = _compute_beta(dr, spy_ret) if len(spy_ret) >= 30 else 1.0
-            capm    = RF + beta * ERP
-            n_bars  = len(bars)
-            d_from  = bars[0]['t'][:10]
-            d_to    = bars[-1]['t'][:10]
-        else:
-            _, vol, price = TICKER_PRIORS.get(t, DEFAULT_PRIOR)
-            trail  = 0.0; beta = 1.0; capm = RF + ERP
-            n_bars = 0; d_from = d_to = 'N/A'
-        rows.append(dict(t=t, live=live, n=n_bars, d_from=d_from, d_to=d_to,
-                         price=price, vol=vol, beta=beta, capm=capm, trail=trail))
-
-    spy_info = (f"{len(spy_bars)} bars {spy_bars[0]['t'][:10]}→{spy_bars[-1]['t'][:10]}"
-                if spy_bars else "NO SPY DATA — beta defaults to 1.0")
-
-    row_html = ''
-    for r in rows:
-        badge = '<span style="color:#4ade80;font-weight:800">✓ LIVE</span>' if r['live'] \
-                else '<span style="color:#f87171;font-weight:800">✗ PRIOR</span>'
-        row_html += f"""<tr>
-          <td style="font-weight:800;font-size:14px">{r['t']}</td>
-          <td>{badge}</td>
-          <td style="color:#5a5270">{r['n']} bars ({r['d_from']}→{r['d_to']})</td>
-          <td style="color:#e8e6f0">${r['price']:.2f}</td>
-          <td style="color:#9b6dff">{r['vol']*100:.1f}%</td>
-          <td style="color:#7b8fff">{r['beta']:.2f}</td>
-          <td style="color:#4ade80">+{r['capm']*100:.1f}%</td>
-          <td style="color:#fbbf24">{r['trail']*100:+.1f}%</td>
-        </tr>"""
-
-    ok = 'OK' in status
+    """Massive connection status and what is in the price cache."""
+    key_set = bool(os.environ.get('MASSIVE_API_KEY', '').strip())
+    rows = ''.join(
+        f"<tr><td>{c['ticker']}</td><td>{c['n']}</td><td>{c['first']} → {c['last']}</td>"
+        f"<td>{c['fetched_at']}</td><td style='color:{'#4ade80' if c['fresh'] else '#fbbf24'}'>"
+        f"{'fresh' if c['fresh'] else 'stale, refreshing'}</td></tr>" for c in md.cache_status())
     html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Debug</title>
 <style>body{{background:#0d0d13;color:#e8e6f0;font-family:monospace;padding:28px;font-size:13px}}
-h1{{color:#9b6dff;margin-bottom:8px}}
-.status{{background:#16141f;border:1px solid #2a2040;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:12px;line-height:1.8}}
-table{{width:100%;border-collapse:collapse}}
-th{{text-align:left;padding:8px 10px;color:#5a5270;border-bottom:1px solid #2a2040;font-size:10px;text-transform:uppercase;letter-spacing:.08em}}
-td{{padding:9px 10px;border-bottom:0.5px solid rgba(42,32,64,.4)}}
-.note{{font-size:11px;color:#5a5270;margin-top:20px;line-height:1.8}}</style></head><body>
-<h1>🔬 Alpaca Debug — Wolf//Portfolio</h1>
-<div class="status">
-<b>Alpaca status:</b> <span style="color:{'#4ade80' if ok else '#f87171'}">{status}</span><br>
-<b>SPY for beta:</b> {spy_info}<br>
-<b>Keys present:</b> {'✓ ALPACA_API_KEY + ALPACA_SECRET_KEY' if ALPACA_KEY else '✗ Missing — set in Railway Variables'}</div>
-<table><thead><tr><th>Ticker</th><th>Source</th><th>Coverage</th>
-<th>Price</th><th>Realized Vol</th><th>Beta vs SPY</th>
-<th>CAPM Return</th><th>Trailing 1yr</th></tr></thead>
-<tbody>{row_html}</tbody></table>
-<div class="note">
-<b>Vol:</b> daily_std × √252 from real price bars<br>
-<b>Beta:</b> OLS regression vs SPY daily returns<br>
-<b>CAPM Return:</b> Rf(4.5%) + β × ERP(5.5%) — drives optimizer + Sharpe<br>
-<b>Trailing 1yr:</b> informational only, not used in any calculation<br>
-If PRIOR shows, Alpaca returned no bars — check status above for HTTP error.
-</div></body></html>"""
+td,th{{padding:6px 10px;border-bottom:1px solid #2a2040;text-align:left}}</style></head><body>
+<h2>Massive data status</h2>
+<p>MASSIVE_API_KEY: {'set' if key_set else '<b style="color:#f87171">missing — add it in Railway Variables</b>'}<br>
+Calls in the last minute: {md.calls_last_minute()} of {md._calls_per_min() or 'unlimited'}<br>
+Expected latest session: {md.expected_last_session()}<br>Cache folder: {md.CACHE_DIR}</p>
+<table><tr><th>Ticker</th><th>Bars</th><th>Range</th><th>Fetched</th><th>State</th></tr>{rows}</table>
+</body></html>"""
     return html, 200, {'Content-Type': 'text/html'}
 
 
