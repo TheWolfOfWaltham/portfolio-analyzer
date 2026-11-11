@@ -28,16 +28,6 @@ const MACRO_COLORS = {
   'Defensive':        '#0a1a0e',  // near-black forest (Group 6)
   'Other':            '#160d38',  // vantablack violet (Group 3)
 };
-const SUB_TO_MACRO = {
-  'Semiconductors':'AI Compute','AI Cloud Infra':'AI Compute',
-  'AI Infra Optical':'AI Infrastructure','Optical Transceivers':'AI Infrastructure',
-  'AI Networking':'AI Infrastructure','Custom ASIC':'AI Infrastructure',
-  'Power Infra':'Power & Energy','Power Generation':'Power & Energy','Nuclear Power':'Power & Energy',
-  'Enterprise SaaS':'Growth/SaaS','Fintech':'Growth/SaaS','Cybersecurity':'Growth/SaaS',
-  'Consumer Staples':'Defensive','Healthcare':'Defensive','Conglomerate':'Defensive',
-  'Financials':'Defensive','Utilities':'Defensive','Utility':'Defensive','Other':'Other',
-};
-
 // Glow colors — lighter/more vibrant than fill colors for visible glow effect
 const GLOW_COLORS = {
   // AI Optical — teal glow
@@ -78,7 +68,64 @@ const FREQ = {
 };
 let currentFreq = 'biweekly';
 
+// "Load My Portfolio" list (mirrors DEFAULT_PORTFOLIO in portfolio_engine.py)
+const DEFAULT_TICKERS = ['GLW','SNDK','NBIS','GEV','MRVL','COHR','ANET','VST','NOW'];
+
 function tickerColor(t,i){ return TICKER_COLORS[t]||PALETTE[i%PALETTE.length]; }
+
+// ── Null-safe formatting (fields may be missing in older or merged responses) ─
+function num(v){
+  if(v===null||v===undefined||v==='') return null;
+  const n=+v;
+  return Number.isFinite(n)?n:null;
+}
+function fmtNum(v,dp=2,fallback='n/a'){ const n=num(v); return n===null?fallback:n.toFixed(dp); }
+function fmtPct(v,dp=1,signed=false,fallback='n/a'){
+  const n=num(v);
+  if(n===null) return fallback;
+  return (signed&&n>=0?'+':'')+n.toFixed(dp)+'%';
+}
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── Analyst targets entered by the user (never served by the app) ────────────
+const TARGETS_KEY = 'wolf.analystTargets';
+function loadTargets(){
+  try{
+    const raw = window.localStorage.getItem(TARGETS_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    const out = {};
+    if(obj && typeof obj==='object'){
+      Object.keys(obj).forEach(t=>{ const v=num(obj[t]); if(v!==null&&v>0) out[t]=v; });
+    }
+    return out;
+  } catch(e){ return {}; }
+}
+function saveTargets(){
+  try{ window.localStorage.setItem(TARGETS_KEY, JSON.stringify(analystTargets)); }
+  catch(e){ /* storage unavailable: targets stay in memory for this visit */ }
+}
+let analystTargets = loadTargets();
+
+function targetsPayload(list){
+  const out = {};
+  list.forEach(t=>{ const v=num(analystTargets[t]); if(v!==null&&v>0) out[t]=v; });
+  return out;
+}
+function setTarget(input){
+  const t = input.dataset.ticker;
+  const v = num(input.value);
+  if(v!==null&&v>0) analystTargets[t]=v; else delete analystTargets[t];
+  saveTargets();
+}
+function targetKey(e,input){
+  if(e.key==='Enter'){ e.preventDefault(); setTarget(input); runAnalysis({rerun:true}); }
+}
+function applyTargets(){
+  document.querySelectorAll('.target-input').forEach(setTarget);
+  runAnalysis({rerun:true});
+}
 
 // ── Stars — screen blend mode overlay, appears over all content ───────────────
 function initStars(){
@@ -168,12 +215,9 @@ function setFreq(btn){
   document.querySelectorAll('.freq-tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   currentFreq = btn.dataset.freq;
-  updateRothDisplay();
 }
 function loadDefault(){ tickers=[...DEFAULT_TICKERS]; renderChips(); }
 function clearAll(){ tickers=[]; renderChips(); }
-
-document.getElementById('biweekly').addEventListener('input', ()=>{});
 
 // ── Status ────────────────────────────────────────────────────────────────────
 function showStatus(msg,isErr=false){
@@ -184,27 +228,37 @@ function showStatus(msg,isErr=false){
 function hideStatus(){ document.getElementById('statusBar').className='status-bar'; }
 
 // ── Analysis ──────────────────────────────────────────────────────────────────
-async function runAnalysis(){
+async function runAnalysis(opts){
+  // rerun = triggered from the position table (targets), so keep results on screen
+  const rerun = !!(opts&&opts.rerun);
   if(tickers.length<2){ showStatus('Add at least 2 tickers.',true); return; }
-  showStatus('Fetching market data and running optimization…');
+  showStatus(rerun?'Rerunning the analysis with your analyst targets…':'Fetching market data and running optimization…');
   document.getElementById('analyzeBtn').disabled=true;
-  document.getElementById('results').className='';
+  const applyBtn=document.getElementById('applyTargetsBtn');
+  if(applyBtn) applyBtn.disabled=true;
+  if(!rerun) document.getElementById('results').className='';
   try{
     const rawContrib = +document.getElementById('biweekly').value;
     const annualContrib = FREQ[currentFreq].toAnnual(rawContrib);
     const biweeklyEquiv = annualContrib / 26; // normalize to biweekly for backend
+    const body = {tickers,capital:+document.getElementById('capital').value,
+      biweekly:biweeklyEquiv, mode:currentMode};
+    const targets = targetsPayload(tickers);
+    if(Object.keys(targets).length) body.targets = targets;
     const res=await fetch('/api/analyze',{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tickers,capital:+document.getElementById('capital').value,
-        biweekly:biweeklyEquiv, mode:currentMode})
+      body:JSON.stringify(body)
     });
     const data=await res.json();
     if(data.error){ showStatus(data.error,true); return; }
     hideStatus(); renderAll(data);
     document.getElementById('results').className='visible';
-    document.getElementById('results').scrollIntoView({behavior:'smooth',block:'start'});
+    if(!rerun) document.getElementById('results').scrollIntoView({behavior:'smooth',block:'start'});
   } catch(e){ showStatus('Error: '+e.message,true); console.error(e); }
-  finally{ document.getElementById('analyzeBtn').disabled=false; }
+  finally{
+    document.getElementById('analyzeBtn').disabled=false;
+    if(applyBtn) applyBtn.disabled=false;
+  }
 }
 
 function destroyChart(id){ if(chartInstances[id]){ chartInstances[id].destroy(); delete chartInstances[id]; } }
@@ -217,11 +271,29 @@ function renderAll(d){
   lastPositionData=d;
   lastCovMatrix = d.cov_matrix||null;
   lastBetas = {};
-  (d.positions||[]).forEach(p=>{ lastBetas[p.ticker]=p.beta||1.0; });
+  // adjusted beta as served; no default is invented when one is missing
+  (d.positions||[]).forEach(p=>{ const b=num(p.beta); if(b!==null) lastBetas[p.ticker]=b; });
+  renderModelNote(d);
   renderHeroBubbles(d);
   renderKPIs(d); renderRiskPanel(d); renderStackedBar(d); renderExposure(d);
   renderFrontier(d); renderMonteCarlo(d);
   renderScenarios(d); renderPositionTable(d); renderScenarioTables(d);
+}
+
+// Position cap and momentum status, from the response (blank when absent)
+function renderModelNote(d){
+  const el=document.getElementById('modelNote');
+  if(!el) return;
+  const parts=[];
+  const cap=num(d.cap);
+  if(cap!==null) parts.push('Position cap: '+cap.toFixed(0)+'% per name.');
+  const n=num(d.mom_universe_n);
+  if(d.mom_active===false){
+    parts.push('Momentum is switched off until enough history is cached'+(n!==null?' ('+n.toFixed(0)+' names qualify so far)':'')+'.');
+  } else if(d.mom_active===true){
+    parts.push('Momentum is ranked across '+(n!==null?n.toFixed(0)+' ':'')+'watchlist names.');
+  }
+  el.textContent=parts.join(' ');
 }
 
 function renderRiskPanel(d, extraRisks){
@@ -246,7 +318,7 @@ function renderRiskPanel(d, extraRisks){
   if(aiPct>65){
     risks.push({
       header:'Concentration Risk: '+aiPct.toFixed(0)+'% AI sector exposure',
-      body:'A single AI capex pause or macro risk-off event would hit the majority of this portfolio simultaneously. Consider adding uncorrelated sectors — energy, healthcare, or consumer staples.'
+      body:'A single AI capex pause or macro risk-off event would hit the majority of this portfolio simultaneously. Consider adding uncorrelated sectors such as energy, healthcare, or consumer staples.'
     });
   } else if(aiPct>50){
     risks.push({
@@ -257,7 +329,7 @@ function renderRiskPanel(d, extraRisks){
   if(p.ann_vol>60){
     risks.push({
       header:'Volatility Risk: Portfolio vol of '+p.ann_vol+'% is very high',
-      body:'Annualized volatility of '+p.ann_vol+'% means the portfolio can swing ±'+Math.round(p.ann_vol/Math.sqrt(12))+'% in a typical month. DCA strategy helps — but consider a vol-reducing hedge position.'
+      body:'Annualized volatility of '+p.ann_vol+'% means the portfolio can swing ±'+Math.round(p.ann_vol/Math.sqrt(12))+'% in a typical month. DCA strategy helps, but consider a vol-reducing hedge position.'
     });
   } else if(p.ann_vol>40){
     risks.push({
@@ -294,18 +366,24 @@ function renderKPIs(d){
   const annualRoth = FREQ[currentFreq].toAnnual(rawRoth);
   const rothBiweekly = annualRoth / 26;
   // FV of Roth contributions over 3yr at portfolio geometric return
+  // server values shown as served; missing ones read n/a
+  const show = (x,suf='') => num(x)!==null ? x+suf : 'n/a';
   const geomR = (p.ann_ret/100) - 0.5*Math.pow(p.ann_vol/100,2);
   const rPerPeriod = (1+geomR)**(1/26)-1;
   const roth3yrFV = rPerPeriod > 0
     ? rothBiweekly * ((Math.pow(1+rPerPeriod,26*3)-1)/rPerPeriod)
     : rothBiweekly * 26 * 3;
+  const rothTxt = Number.isFinite(roth3yrFV) ? '$'+Math.round(roth3yrFV).toLocaleString() : 'n/a';
+  const ew = num(p.ew_sharpe);
+  const sharpeSub = 'rf = '+(num(d.rf)!==null?num(d.rf)+'%':'n/a')+
+    (ew!==null?'<br>equal weight: '+ew.toFixed(2):'');
   document.getElementById('kpiStrip').innerHTML=
-    '<div class="kpi kpi-green"><div class="kpi-label">Exp. Annual Return</div><div class="kpi-val">'+p.ann_ret+'%</div><div class="kpi-sub">forward estimate</div></div>'+
-    '<div class="kpi"><div class="kpi-label">Portfolio Volatility</div><div class="kpi-val" style="color:var(--text)">'+p.ann_vol+'%</div><div class="kpi-sub">annualized</div></div>'+
-    '<div class="kpi kpi-purple"><div class="kpi-label">Sharpe Ratio</div><div class="kpi-val">'+p.sharpe+'</div><div class="kpi-sub">rf = '+(d.rf!=null?d.rf+'%':'n/a')+'</div></div>'+
-    '<div class="kpi kpi-green"><div class="kpi-label">3yr Compounded</div><div class="kpi-val">'+((+p.port_3yr_geom)>=0?'+':'')+p.port_3yr_geom+'%</div><div class="kpi-sub">median outcome</div></div>'+
-    '<div class="kpi kpi-red"><div class="kpi-label">Est. Max Drawdown</div><div class="kpi-val">'+p.max_dd_est+'%</div><div class="kpi-sub">2.5\u03c3 stress'+(p.max_dd_hist!=null?' · past year: '+p.max_dd_hist+'%':'')+'</div></div>'+
-    '<div class="kpi kpi-purple"><div class="kpi-label">Roth IRA — 3yr Est.</div><div class="kpi-val" style="font-size:18px">$'+Math.round(roth3yrFV).toLocaleString()+'</div><div class="kpi-sub">DCA @ portfolio return</div></div>';
+    '<div class="kpi kpi-green"><div class="kpi-label">Exp. Annual Return</div><div class="kpi-val">'+show(p.ann_ret,'%')+'</div><div class="kpi-sub">forward estimate</div></div>'+
+    '<div class="kpi"><div class="kpi-label">Portfolio Volatility</div><div class="kpi-val" style="color:var(--text)">'+show(p.ann_vol,'%')+'</div><div class="kpi-sub">annualized</div></div>'+
+    '<div class="kpi kpi-purple"><div class="kpi-label">Sharpe Ratio</div><div class="kpi-val">'+show(p.sharpe)+'</div><div class="kpi-sub">'+sharpeSub+'</div></div>'+
+    '<div class="kpi kpi-green"><div class="kpi-label">3yr Compounded</div><div class="kpi-val">'+(num(p.port_3yr_geom)!==null&&num(p.port_3yr_geom)>=0?'+':'')+show(p.port_3yr_geom,'%')+'</div><div class="kpi-sub">median outcome</div></div>'+
+    '<div class="kpi kpi-red"><div class="kpi-label">Est. Max Drawdown</div><div class="kpi-val">'+show(p.max_dd_est,'%')+'</div><div class="kpi-sub">2.5\u03c3 stress'+(p.max_dd_hist!=null?' · past year: '+p.max_dd_hist+'%':'')+'</div></div>'+
+    '<div class="kpi kpi-purple"><div class="kpi-label">Roth IRA 3yr Est.</div><div class="kpi-val" style="font-size:18px">'+rothTxt+'</div><div class="kpi-sub">DCA @ portfolio return</div></div>';
 }
 
 // ── Stacked bar ───────────────────────────────────────────────────────────────
@@ -457,35 +535,78 @@ function renderPositionTable(d){
   });
   const arrow=c=>c===sortCol?(sortDir==='desc'?' ▾':' ▴'):'';
   const thS='cursor:pointer;user-select:none;white-space:nowrap';
+  const subTh='<div style="font-size:9px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--text-faint)">';
   const hdrs=[
     {k:'ticker',l:'Ticker'},{k:'weight',l:'Weight'},
-    {k:'beta',l:'β Beta'},{k:'blended_return',l:'Exp. Return (blend)'},
+    {k:'beta',l:'β Beta',s:'adjusted (raw)'},{k:'blended_return',l:'Exp. Return',s:'anchor + momentum + target'},
     {k:'ann_vol',l:'Ann. Vol'},{k:'sharpe',l:'Sharpe'},{k:'rc_pct',l:'Risk Contrib.'},
+    {k:'',l:'Analyst target ($)',s:'entered by you, not from the app'},
     {k:'',l:'Your Estimate'}
-  ].map(h=>'<th style="'+thS+(h.k?'" onclick="sortTable(\''+h.k+'\')':'')+'">'+(h.k?h.l+arrow(h.k):h.l)+'</th>').join('');
+  ].map(h=>'<th style="'+thS+(h.k?'" onclick="sortTable(\''+h.k+'\')':'')+'">'+(h.k?h.l+arrow(h.k):h.l)+(h.s?subTh+h.s+'</div>':'')+'</th>').join('');
 
-  const rows=positions.map((p,i)=>{
+  const mono='font-size:9px;color:var(--text-dim);font-family:\'DM Mono\',monospace';
+  const inputStyle='background:#0d0d13;border:1px solid #2a2040;border-radius:5px;padding:4px 6px;font-family:\'DM Mono\',monospace;font-size:11px;color:#e8e6f0;text-align:right';
+  const sectors=d.sectors||{};
+
+  const rows=positions.map(p=>{
     const glow=glowFor(p.ticker);
-    const sec=d.sectors[p.ticker]?d.sectors[p.ticker].sector:'Other';
-    const rcClass=p.rc_pct>25?'tag-high':p.rc_pct>12?'tag-med':'tag-low';
-    const isLive=p.data_source&&!p.data_source.includes('PRIOR');
-    const srcBadge=isLive?'<span class="source-badge source-live">live</span>':'<span class="source-badge source-prior">prior</span>';
-    const hasFMP=p.analyst_target&&p.analyst_implied!==null&&p.analyst_implied!==undefined;
-    const blendLabel='<span style="font-size:9px;color:'+(hasFMP?'var(--purple-mid)':'var(--text-faint)')+
-      ';font-weight:600">'+(p.return_source||'')+'</span>';
-    const analystNote=hasFMP
-      ?'<div style="font-size:9px;color:var(--text-dim);font-family:\'DM Mono\',monospace">target $'+(p.analyst_target||0).toFixed(2)+' → '+p.analyst_implied+'%</div>':'';
-    const blended=p.blended_return||p.ann_ret||0;
+    const sec=sectors[p.ticker]?sectors[p.ticker].sector:'Other';
+    const rc=num(p.rc_pct);
+    const rcClass=rc>25?'tag-high':rc>12?'tag-med':'tag-low';
+
+    // Price-date badge: shown only when the server supplies a date
+    const dateMatch=String(p.price_date||p.data_source||'').match(/\d{4}-\d{2}-\d{2}/);
+    const srcBadge=dateMatch?'<span class="source-badge source-live" title="'+esc(p.data_source||'')+'">'+dateMatch[0]+'</span>':'';
+
+    // Beta: adjusted, raw as secondary text, note (e.g. prior beta used) as tooltip
+    const betaRaw=num(p.beta_raw);
+    const betaCell='<td style="font-family:\'DM Mono\',monospace;color:var(--blue)"'+(p.beta_note?' title="'+esc(p.beta_note)+'"':'')+'>'+
+      fmtNum(p.beta,2)+(p.beta_raw===null?'*':'')+
+      (betaRaw!==null?'<div style="'+mono+'">raw '+betaRaw.toFixed(2)+'</div>':'')+'</td>';
+
+    // Return decomposition
+    const total=num(p.blended_return)!==null?num(p.blended_return):num(p.ann_ret);
+    const anchor=num(p.anchor_return)!==null?num(p.anchor_return):num(p.capm_return);
+    const lines=[];
+    if(anchor!==null) lines.push('anchor '+fmtPct(anchor,1,true));
+    if(d.mom_active===false){
+      lines.push('momentum off');
+    } else if(num(p.alpha_mom)!==null){
+      const extra=[];
+      if(num(p.mom_z)!==null) extra.push('z '+fmtNum(p.mom_z,2));
+      if(num(p.mom_12_1)!==null) extra.push('12-1 '+fmtPct(p.mom_12_1,1,true));
+      lines.push('momentum '+fmtPct(p.alpha_mom,1,true)+
+        (extra.length?'<div style="'+mono+';color:var(--text-faint)">'+extra.join(' · ')+'</div>':''));
+    }
+    if(num(p.alpha_analyst)!==null) lines.push('your target '+fmtPct(p.alpha_analyst,1,true));
+    const decomp=lines.map(l=>'<div style="'+mono+'">'+l+'</div>').join('');
+    const srcLabel='<div style="font-size:9px;color:'+(num(p.alpha_analyst)!==null?'var(--purple-mid)':'var(--text-faint)')+
+      ';font-weight:600">'+esc(p.return_source||'')+'</div>';
+
+    // Analyst target input (user value) and its bias-adjusted effect from the server
+    const tgt=num(analystTargets[p.ticker])!==null?num(analystTargets[p.ticker]):num(p.analyst_target);
+    let tgtNote='';
+    if(num(p.alpha_analyst)!==null){
+      tgtNote='<div style="'+mono+'">'+(num(p.analyst_implied)!==null?'implies '+fmtPct(p.analyst_implied,1,true)+', ':'')+
+        'adds '+fmtPct(p.alpha_analyst,1,true)+' after bias adj.</div>';
+    } else if(tgt!==null){
+      tgtNote='<div style="'+mono+'">press Enter to apply</div>';
+    }
+
+    const totalTxt=total!==null?total.toFixed(1):'';
+    const userRet=num(p.user_return);
+    const shownTxt=userRet!==null?String(userRet):totalTxt;
     return '<tr>'+
       '<td><span style="color:#fff;background:#000;padding:3px 10px;border-radius:5px;display:inline-block;box-shadow:0 0 10px 2px '+glow+',0 0 20px 4px '+glow.replace(/[\d.]+\)$/,'0.18)')+';font-family:\'Space Grotesk\',sans-serif;font-size:12px;font-weight:800">'+p.ticker+'</span>'+
-      '<div style="font-size:9px;color:var(--text-dim);margin-top:2px;display:flex;align-items:center;gap:4px">'+sec+' '+srcBadge+'</div></td>'+
-      '<td style="font-weight:800">'+p.weight+'%</td>'+
-      '<td style="font-family:\'DM Mono\',monospace;color:var(--blue)">'+(p.beta||1).toFixed(2)+'</td>'+
-      '<td><span style="font-weight:800;color:var(--purple-mid)">+'+blended.toFixed(1)+'%</span>'+blendLabel+analystNote+'</td>'+
-      '<td style="font-family:\'DM Mono\',monospace">'+p.ann_vol+'%</td>'+
-      '<td style="font-weight:700">'+p.sharpe+'</td>'+
-      '<td><span class="tag '+rcClass+'">'+p.rc_pct+'%</span></td>'+
-      '<td><input type="number" class="ret-override-input" data-ticker="'+p.ticker+'" data-original="'+blended.toFixed(1)+'" value="'+blended.toFixed(1)+'" step="0.5" min="-50" max="200" onchange="markOverride(this)" style="width:70px;background:#0d0d13;border:1px solid #2a2040;border-radius:5px;padding:4px 6px;font-family:\'DM Mono\',monospace;font-size:11px;color:#e8e6f0;text-align:right"/><span style="font-size:9px;color:var(--text-faint);margin-left:3px">%</span></td>'+
+      '<div style="font-size:9px;color:var(--text-dim);margin-top:2px;display:flex;align-items:center;gap:4px">'+esc(sec)+' '+srcBadge+'</div></td>'+
+      '<td style="font-weight:800">'+fmtPct(p.weight)+'</td>'+
+      betaCell+
+      '<td><span style="font-weight:800;color:var(--purple-mid)">'+fmtPct(total,1,true)+'</span>'+srcLabel+decomp+'</td>'+
+      '<td style="font-family:\'DM Mono\',monospace">'+fmtPct(p.ann_vol)+'</td>'+
+      '<td style="font-weight:700">'+fmtNum(p.sharpe,2)+'</td>'+
+      '<td><span class="tag '+rcClass+'">'+fmtPct(p.rc_pct)+'</span></td>'+
+      '<td><span style="font-size:9px;color:var(--text-faint);margin-right:3px">$</span><input type="number" class="target-input" data-ticker="'+p.ticker+'" value="'+(tgt!==null?tgt:'')+'" step="0.01" min="0" placeholder="none" onchange="setTarget(this)" onkeydown="targetKey(event,this)" style="width:80px;'+inputStyle+'"/>'+tgtNote+'</td>'+
+      '<td><input type="number" class="ret-override-input" data-ticker="'+p.ticker+'" data-original="'+(total!==null?String(total):'')+'" value="'+shownTxt+'" step="0.5" min="-50" max="200" onchange="markOverride(this)" style="width:70px;'+inputStyle+'"/><span style="font-size:9px;color:var(--text-faint);margin-left:3px">%</span></td>'+
       '</tr>';
   }).join('');
 
@@ -557,7 +678,7 @@ function buildScenarioTable(key,s){
     '<td style="font-weight:800;color:var(--purple-mid)">TOTAL</td>'+
     '<td style="font-weight:800;font-family:\'DM Mono\',monospace">$'+Math.round(sumInit).toLocaleString()+'</td>'+
     '<td style="font-weight:800;font-family:\'DM Mono\',monospace">$'+sumBwk.toFixed(2)+'</td>'+
-    '<td style="color:var(--text-dim)">—</td>'+
+    '<td style="color:var(--text-dim)">n/a</td>'+
     '<td style="font-weight:800">$'+s.totals.yr1.toLocaleString()+'</td>'+
     '<td style="font-weight:800">$'+s.totals.yr2.toLocaleString()+'</td>'+
     '<td style="font-weight:800;color:'+s.color+'">$'+s.totals.yr3.toLocaleString()+'</td>'+
@@ -568,7 +689,7 @@ function buildScenarioTable(key,s){
     '</tr>';
 
   return '<div class="chart-card" id="scen-table-'+key+'" style="margin-bottom:14px">'+
-    '<h3 style="color:'+s.color+'">'+s.label+' <span style="font-size:10px;color:var(--text-dim);font-weight:400;text-transform:none">— click columns to sort · Total Return = gain vs all capital deployed (init + DCA)</span></h3>'+
+    '<h3 style="color:'+s.color+'">'+s.label+' <span style="font-size:10px;color:var(--text-dim);font-weight:400;text-transform:none">click columns to sort · Total Return = gain vs all capital deployed (init + DCA)</span></h3>'+
     '<div style="overflow-x:auto;margin-top:12px">'+
     '<table class="pos-table"><thead><tr>'+hdrs+'</tr></thead>'+
     '<tbody>'+rowsHTML+sumRow+'</tbody></table></div></div>';
@@ -595,7 +716,8 @@ async function runSmart(){
   showStatus('Analysing your portfolio…');
   try{
     const res=await fetch('/api/smart',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tickers,weights:tickers.map(()=>1/tickers.length),user_prompt:prompt})});
+      body:JSON.stringify({tickers,weights:tickers.map(()=>1/tickers.length),user_prompt:prompt,
+        targets:targetsPayload(tickers)})});
     const data=await res.json();
     if(data.error){ showStatus(data.error,true); return; }
     hideStatus();
@@ -635,9 +757,8 @@ function renderSmart(data){
     const glow=glowFor(s.ticker);
     const col=tickerColor(s.ticker,0);
     const sd=s.sharpe_delta||0, vd=s.vol_delta||0, rd=s.ret_delta||0;
-    const parts=(s.desc||'').split(' — ');
-    const company=parts[0]||s.ticker;
-    const whyNow=parts.slice(1).join(' — ');
+    const company=esc(s.company||s.ticker);
+    const whyNow=esc(s.why_now||'');
     const retVal=typeof s.exp_return==='number'?s.exp_return:(parseFloat(s.exp_return)||0);
     const volVal=typeof s.ann_vol==='number'?s.ann_vol:(parseFloat(s.ann_vol)||0);
     return '<div class="smart-card">'+
@@ -650,7 +771,7 @@ function renderSmart(data){
         '</div></div>'+
       (company?'<div class="smart-desc" style="font-weight:600;color:var(--text-muted);margin-bottom:4px">'+company+'</div>':'')+
       (whyNow?'<div style="font-size:11px;color:var(--purple-mid);font-style:italic;margin-bottom:6px">'+whyNow+'</div>':'')+
-      '<div class="smart-desc">'+s.rationale+'</div>'+
+      '<div class="smart-desc">'+esc(s.rationale||'')+'</div>'+
       '<div class="smart-impacts">'+
         impactTag('Sharpe',(sd>=0?'+':'')+sd.toFixed(3),true)+
         impactTag('Vol',(vd>=0?'+':'')+vd.toFixed(1)+'%',false)+
@@ -731,8 +852,8 @@ function initNasdaqBanner(){
 
 // ── Hero bubbles ──────────────────────────────────────────────────────────────
 function renderHeroBubbles(d){
-  const capital   = d.capital||10000;
-  const biweekly  = d.biweekly||500;
+  const capital   = num(d.capital)!==null?num(d.capital):0;
+  const biweekly  = num(d.biweekly)!==null?num(d.biweekly):0;
   const totalDCA  = biweekly * 26 * 3;
   const totalIn   = capital + totalDCA;
   const baseYr3   = d.scenarios?.base?.totals?.yr3 || 0;
@@ -743,13 +864,13 @@ function renderHeroBubbles(d){
   bubbles.innerHTML =
     // 1. Total capital deployed
     '<div class="hero-bubble">' +
-      '<div class="hb-label">Total Capital Deployed — 3yr</div>' +
+      '<div class="hb-label">Total Capital Deployed, 3yr</div>' +
       '<div class="hb-val" style="color:var(--purple-mid)">$'+totalIn.toLocaleString()+'</div>' +
       '<div class="hb-sub">$'+capital.toLocaleString()+' initial + $'+Math.round(totalDCA).toLocaleString()+' DCA</div>' +
     '</div>' +
     // 2. Base case future value
     '<div class="hero-bubble">' +
-      '<div class="hb-label">Base Case — 3yr Portfolio Value</div>' +
+      '<div class="hb-label">Base Case 3yr Portfolio Value</div>' +
       '<div class="hb-val" style="color:var(--blue)">$'+baseYr3.toLocaleString()+'</div>' +
       '<div class="hb-sub">'+( +baseAdj>=0?'+':'')+baseAdj+'% on all capital deployed</div>' +
     '</div>' +
@@ -773,9 +894,7 @@ function renderTreemap(positions){
   let remaining = [...sorted];
   let totalH = wrap.offsetHeight || 180;
   let totalW = wrap.offsetWidth  || 300;
-  let yOff = 0;
   while(remaining.length > 0){
-    const rowW = remaining.reduce((s,p)=>s+p.weight,0)/total*totalH;
     // Decide how many go in this row (aspect ratio heuristic)
     let rowItems = [], rowWeight = 0;
     for(let i=0;i<remaining.length;i++){
@@ -801,7 +920,6 @@ function renderTreemap(positions){
       }
       wrap.appendChild(div);
     });
-    yOff += rowH;
     if(remaining.length===0) break;
     totalH -= rowH;
     if(totalH < 10) break;
@@ -865,8 +983,27 @@ function markOverride(input){
 async function runRecalculate(){
   if(!lastPositionData||!lastCovMatrix){ showStatus('Run Analyze first.',true); return; }
   const inputs = document.querySelectorAll('.ret-override-input');
-  const overrides = {};
-  inputs.forEach(inp=>{ overrides[inp.dataset.ticker]=parseFloat(inp.value)||10; });
+  const overrides = {}, typed = {}, blank = [], outOfRange = [];
+  inputs.forEach(inp=>{
+    const t = inp.dataset.ticker;
+    const orig = num(inp.dataset.original);
+    const val = num(inp.value);
+    // an empty or untouched cell sends the served full-precision return; nothing is made up
+    const untouched = val===null || (orig!==null && Math.abs(val-Number(orig.toFixed(1)))<1e-9);
+    const v = untouched ? orig : val;
+    if(v===null){ blank.push(t); return; }
+    const lo = num(inp.min), hi = num(inp.max);
+    if((lo!==null && v<lo) || (hi!==null && v>hi)){ outOfRange.push(t); return; }
+    overrides[t]=v;
+    if(!untouched) typed[t]=val;
+  });
+  if(blank.length){ showStatus('Enter a return estimate for '+blank.join(', ')+'.',true); return; }
+  if(outOfRange.length){
+    const any=inputs[0];
+    showStatus('Return estimates must be between '+any.min+'% and '+any.max+'%: '+outOfRange.join(', ')+'.',true);
+    return;
+  }
+  const capitalNow = +document.getElementById('capital').value;
 
   showStatus('Recalculating with your return estimates…');
   document.getElementById('recalcBtn').disabled=true;
@@ -878,7 +1015,7 @@ async function runRecalculate(){
         returns: overrides,
         cov_matrix: lastCovMatrix,
         betas: lastBetas,
-        capital: +document.getElementById('capital').value,
+        capital: capitalNow,
         biweekly: FREQ[currentFreq].toAnnual(+document.getElementById('biweekly').value) / 26,
         mode: currentMode,
       })
@@ -887,12 +1024,29 @@ async function runRecalculate(){
     if(data.error){ showStatus(data.error,true); return; }
     hideStatus();
     // Merge updated portfolio stats back into lastPositionData for re-renders
-    const merged={...lastPositionData, portfolio:data.portfolio, rf:data.rf,
+    // portfolio is taken whole from the response (ew_* depend on the overridden returns)
+    // Positions rebuilt from the new weights (percent) and risk contributions (fractions)
+    const prevPos={};
+    (lastPositionData.positions||[]).forEach(p=>{ prevPos[p.ticker]=p; });
+    const positions=(data.tickers||[]).map((t,i)=>{
+      const w=num((data.weights||[])[i]);
+      const rc=num((data.rc||[])[i]);
+      return {...(prevPos[t]||{ticker:t}),
+        weight:w,
+        dollars:w!==null?Math.round(w/100*capitalNow*100)/100:null,
+        rc_pct:rc!==null?Math.round(rc*1000)/10:null,
+        user_return:typed[t]!==undefined?typed[t]:null};
+    });
+    const merged={...lastPositionData, portfolio:data.portfolio||{},
+      rf:num(data.rf)!==null?data.rf:lastPositionData.rf,
       frontier:data.frontier, mc_paths:data.mc_paths,
-      scenarios:data.scenarios, weights:data.weights};
+      scenarios:data.scenarios, positions,
+      exposure:data.exposure||lastPositionData.exposure};
+    lastPositionData=merged;
     renderKPIs(merged); renderHeroBubbles(merged);
+    renderRiskPanel(merged); renderStackedBar(merged); renderExposure(merged);
     renderFrontier(merged); renderMonteCarlo(merged); renderScenarios(merged);
-    renderScenarioTables(merged);
+    renderPositionTable(merged); renderScenarioTables(merged);
     // Flash the KPI strip to indicate update
     const strip=document.getElementById('kpiStrip');
     strip.style.transition='opacity 0.2s';

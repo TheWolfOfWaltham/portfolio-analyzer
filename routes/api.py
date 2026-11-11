@@ -1,11 +1,12 @@
 from flask import Blueprint, request, jsonify
 import sys, os, json, requests as req
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import portfolio_engine as pe
 from portfolio_engine import (fetch_returns, build_cov, optimize, efficient_frontier,
                                monte_carlo, risk_contributions, portfolio_stats,
                                scenario_projections, smart_suggestions_v2, score_candidates,
                                exposure_warnings, portfolio_summary, historical_drawdown,
-                               current_rf, ERP)
+                               current_rf, equal_weight_stats, position_cap, momentum_universe, ERP)
 import market_data as md
 from dotenv import load_dotenv
 import numpy as np
@@ -132,7 +133,8 @@ def _enrich_with_impact(claude_result, tickers, weights, data):
         for s in items:
             t = s.get('ticker','').upper()
             if t:
-                out.append({'ticker': t, 'desc': s.get('company','') + ' — ' + s.get('why_now',''),
+                out.append({'ticker': t, 'desc': s.get('company','') + ': ' + s.get('why_now',''),
+                            'company': s.get('company',''), 'why_now': s.get('why_now',''),
                             'sector': s.get('sector','Other'), 'rationale': s.get('rationale',''),
                             'type': kind})
         return out
@@ -154,6 +156,61 @@ def _loading_response(pending):
                     'pending': pending, 'retry_after': eta}), 503
 
 
+def _parse_targets(raw) -> dict:
+    """{TICKER: price} from the request. Keys are uppercased; non-numeric or non-positive values are ignored."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for k, v in raw.items():
+        if isinstance(v, bool) or not isinstance(k, str) or not k.strip():
+            continue
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(x) and x > 0:
+            out[k.strip().upper()] = x
+    return out
+
+
+def _pct(x, nd=2):
+    return round(x * 100, nd) if x is not None else None
+
+
+def _ew_fields(mu, cov, rf):
+    r, v, s = equal_weight_stats(mu, cov, rf)
+    return {'ew_ret': round(r*100, 1), 'ew_vol': round(v*100, 1), 'ew_sharpe': round(s, 2)}
+
+
+def _data_note(fetched, data, tickers, cap, shrink, missing):
+    rf, ic, n_u = fetched['rf'], fetched['mom_ic'], fetched['mom_universe_n']
+    if fetched['mom_active']:
+        mom = (f"plus a 12-1 momentum alpha of {ic:.3f} x residual vol x z-score, where momentum is ranked within "
+               f"the analyzer's {n_u}-name watchlist, not the whole market")
+        if ic < pe.IC:
+            mom += f" (weight halved because {pe.MARKET}'s own 12-1 return is negative)"
+    else:
+        mom = (f"with momentum switched off because only {n_u} names in the analyzer's watchlist have a full "
+               f"year of history ({pe.MIN_UNIVERSE} needed), and momentum is ranked within that watchlist, "
+               "not the whole market")
+    with_target = [t for t in tickers if data[t]['alpha_analyst'] is not None]
+    tgt = (f", plus {pe.ANALYST_WEIGHT*100:.0f}% of the gap between your price target (less a "
+           f"{pe.ANALYST_BIAS*100:.0f}% optimism haircut) and that anchor for {', '.join(with_target)}"
+           if with_target else "")
+    cov_txt = (f"Ledoit-Wolf shrinkage toward constant correlation (intensity {shrink:.2f})" if shrink is not None
+               else "the sample covariance (too little shared history to shrink)")
+    note = (f"Live data: Massive daily closes through {fetched['through']}. Expected return is a CAPM anchor of "
+            f"rf {rf*100:.2f}% ({fetched['rf_source']}) plus Blume-adjusted beta x an assumed {ERP*100:.1f}% "
+            f"equity risk premium, {mom}{tgt}. Covariance uses {cov_txt} on shared trading days, and no "
+            f"position may exceed {cap*100:.0f}%.")
+    if missing:
+        note += f" Excluded, no price history: {', '.join(missing)}."
+    if fetched.get('rejected_targets'):
+        note += (" Ignored price targets outside 0.2x to 5x the current price: "
+                 f"{', '.join(fetched['rejected_targets'])}.")
+    return note
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @api_bp.route('/analyze', methods=['POST'])
 def analyze():
@@ -162,12 +219,13 @@ def analyze():
     capital  = float(body.get('capital', 10000))
     biweekly = float(body.get('biweekly', 500))
     mode     = body.get('mode', 'sharpe')
+    targets  = _parse_targets(body.get('targets'))
 
     if len(tickers) < 2:
         return jsonify({'error': 'Add at least 2 tickers.'}), 400
 
     try:
-        fetched = fetch_returns(tickers)
+        fetched = fetch_returns(tickers, targets=targets)
     except md.MassiveError as ex:
         return jsonify({'error': str(ex)}), 502
     if fetched['pending']:
@@ -182,45 +240,54 @@ def analyze():
     tickers  = list(data.keys())
     rf       = fetched['rf']
     mu       = np.array([data[t]['ann_ret'] for t in tickers])
-    cov      = build_cov(tickers, data)
-    weights  = optimize(mu.tolist(), cov, mode, rf)
+    cov, shrink = build_cov(tickers, data)
+    cap      = position_cap(len(tickers))
+    try:
+        weights = optimize(mu.tolist(), cov, mode, rf)
+    except ValueError as ex:
+        return jsonify({'error': str(ex)}), 500
     port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov, rf)
     rc       = risk_contributions(weights, cov)
     hist_dd  = historical_drawdown(tickers, weights, data)
     sectors  = _sectors(tickers)
     exposure = _exposure(tickers, weights, sectors)
 
-    sources = sorted({data[t]['return_source'] for t in tickers})
-    data_note = (f"Live data: Massive daily closes through {fetched['through']}. Vol, beta and covariance "
-                 f"from real returns on shared trading days. Returns = {' / '.join(sources)}. "
-                 f"CAPM uses rf {rf*100:.2f}% ({fetched['rf_source']}) and an assumed {ERP*100:.1f}% equity risk premium.")
-    if missing:
-        data_note += f" Excluded, no price history: {', '.join(missing)}."
-
-    positions = [{
-        'ticker':          t,
-        'weight':          round(weights[i]*100, 1),
-        'dollars':         round(weights[i]*capital, 2),
-        'price':           data[t]['price'],
-        'beta':            data[t]['beta'],
-        'capm_return':     data[t]['capm_return'],
-        'analyst_target':  data[t].get('analyst_target'),
-        'analyst_implied': data[t].get('analyst_implied'),
-        'blended_return':  data[t].get('blended_return', data[t]['capm_return']),
-        'return_source':   data[t].get('return_source', 'CAPM only'),
-        'ann_ret':         data[t].get('blended_return', data[t]['capm_return']),
-        'trailing_ret':    data[t].get('trailing_ret', 0),
-        'ann_vol':         round(data[t]['ann_vol']*100, 1),
-        'sharpe':          round(data[t]['sharpe'], 2),
-        'rc_pct':          round(rc[i]*100, 1),
-        'data_source':     data[t].get('data_source',''),
-    } for i, t in enumerate(tickers)]
+    positions = []
+    for i, t in enumerate(tickers):
+        d = data[t]
+        positions.append({
+            'ticker':          t,
+            'weight':          round(weights[i]*100, 1),
+            'dollars':         round(weights[i]*capital, 2),
+            'price':           round(d['price'], 2),
+            'price_date':      d['price_date'],
+            'beta':            round(d['beta'], 3),
+            'beta_raw':        round(d['beta_raw'], 3) if d['beta_raw'] is not None else None,
+            'beta_note':       d['beta_note'],
+            'anchor_return':   _pct(d['anchor']),
+            'capm_return':     _pct(d['anchor']),
+            'alpha_mom':       _pct(d['alpha_mom']),
+            'alpha_analyst':   _pct(d['alpha_analyst']),
+            'mom_12_1':        _pct(d['mom_12_1'], 1),
+            'mom_z':           round(d['mom_z'], 2) if d['mom_z'] is not None else None,
+            'resid_vol':       _pct(d['resid_vol'], 1),
+            'analyst_target':  round(d['analyst_target'], 2) if d['analyst_target'] is not None else None,
+            'analyst_implied': _pct(d['analyst_implied'], 1),
+            'blended_return':  _pct(d['ann_ret']),
+            'ann_ret':         _pct(d['ann_ret']),
+            'return_source':   d['return_source'],
+            'trailing_ret':    _pct(d['trailing_12m'], 1),
+            'ann_vol':         _pct(d['ann_vol'], 1),
+            'sharpe':          round(d['sharpe'], 2),
+            'rc_pct':          round(rc[i]*100, 1),
+            'data_source':     d['data_source'],
+        })
 
     return jsonify({
         'tickers':   tickers,
         'weights':   [round(w*100,1) for w in weights],
         'positions': positions,
-        'portfolio': portfolio_summary(port_ret, port_vol, sharpe, hist_dd),
+        'portfolio': {**portfolio_summary(port_ret, port_vol, sharpe, hist_dd), **_ew_fields(mu, cov, rf)},
         'frontier':  efficient_frontier(mu.tolist(), cov),
         'mc_paths':  monte_carlo(port_ret, port_vol, capital),
         'scenarios': scenario_projections(tickers, weights, capital, biweekly, data, rf),
@@ -232,8 +299,14 @@ def analyze():
         'mode':      mode,
         'is_live':   True,
         'rf':        round(rf*100, 2),
+        'erp':       round(ERP*100, 2),
+        'cap':       round(cap*100, 1),
+        'mom_universe_n': fetched['mom_universe_n'],
+        'mom_ic':    fetched['mom_ic'],
+        'mom_active': fetched['mom_active'],
+        'cov_shrinkage': round(shrink, 3) if shrink is not None else None,
         'missing':   missing,
-        'data_note': data_note,
+        'data_note': _data_note(fetched, data, tickers, cap, shrink, missing),
     })
 
 
@@ -247,9 +320,13 @@ def smart():
     if len(tickers) < 2:
         return jsonify({'error': 'Add at least 2 tickers.'}), 400
     try:
-        fetched = fetch_returns(tickers)
+        return _smart_body(tickers, weights, user_prompt, body.get('targets'))
     except md.MassiveError as ex:
         return jsonify({'error': str(ex)}), 502
+
+
+def _smart_body(tickers, weights, user_prompt, raw_targets):
+    fetched = fetch_returns(tickers, targets=_parse_targets(raw_targets))
     if fetched['pending']:
         return _loading_response(fetched['pending'])
     data = fetched['data']
@@ -291,42 +368,53 @@ def smart():
 def recalculate():
     """
     Re-run optimizer and scenarios with user-overridden expected returns.
-    Accepts the covariance matrix from the prior analyze call to avoid re-fetching data.
+    Accepts the covariance matrix and betas from the prior analyze call to avoid re-fetching data.
+    Each stock's scenario alpha is its override minus its CAPM anchor (rf + beta x ERP).
     """
     body        = request.get_json(force=True)
     tickers     = [t.strip().upper() for t in body.get('tickers', [])]
     overrides   = body.get('returns', {})     # {ticker: pct e.g. 45.0}
     cov_flat    = body.get('cov_matrix', [])  # from prior analyze response
-    betas       = body.get('betas', {})
+    betas       = body.get('betas', {})       # adjusted betas from the prior analyze response
     capital     = float(body.get('capital', 10000))
     biweekly    = float(body.get('biweekly', 500))
     mode        = body.get('mode', 'sharpe')
 
     if not tickers or not cov_flat:
         return jsonify({'error': 'Missing tickers or cov_matrix'}), 400
+    lacking = [t for t in tickers if not isinstance(overrides.get(t), (int, float))
+               or not isinstance(betas.get(t), (int, float))]
+    if lacking:
+        return jsonify({'error': f"Missing return estimate or beta for {', '.join(lacking)}. Run Analyze again."}), 400
+    bad = [t for t in tickers if overrides[t] <= -100 or not np.isfinite(overrides[t])]
+    if bad:
+        return jsonify({'error': f"Return estimates must be above -100%: {', '.join(bad)}."}), 400
 
     try:
-        cov = np.array(cov_flat)
-        mu  = np.array([overrides.get(t, 10.0) / 100.0 for t in tickers])
+        rf, _ = current_rf()
+    except md.MassiveError as ex:
+        return jsonify({'error': str(ex)}), 502
 
-        rf, _    = current_rf()
+    try:
+        cov = np.array(cov_flat, dtype=float)
+        mu  = np.array([overrides[t] / 100.0 for t in tickers])
         weights  = optimize(mu.tolist(), cov, mode, rf)
         port_ret, port_vol, sharpe = portfolio_stats(weights, mu, cov, rf)
 
-        # Reconstruct minimal data dict for scenario_projections (needs beta)
-        data_stub = {t: {'ann_ret': mu[i], 'ann_vol': 0.5,
-                         'beta': betas.get(t, 1.0), 'returns': [0]*252}
+        # Minimal data dict for scenario_projections: beta and the alpha implied by the override
+        data_stub = {t: {'beta': float(betas[t]), 'alpha': float(mu[i] - (rf + float(betas[t]) * ERP))}
                      for i, t in enumerate(tickers)}
 
         return jsonify({
             'tickers':   tickers,
             'weights':   [round(w*100,1) for w in weights],
-            'portfolio': portfolio_summary(port_ret, port_vol, sharpe),
+            'portfolio': {**portfolio_summary(port_ret, port_vol, sharpe), **_ew_fields(mu, cov, rf)},
             'frontier':  efficient_frontier(mu.tolist(), cov),
             'mc_paths':  monte_carlo(port_ret, port_vol, capital),
             'scenarios': scenario_projections(tickers, weights, capital, biweekly, data_stub, rf),
             'rf':        round(rf*100, 2),
             'rc':        risk_contributions(weights, cov),
+            'exposure':  _exposure(tickers, weights, _sectors(tickers)),
         })
     except Exception as ex:
         return jsonify({'error': str(ex)}), 500
@@ -371,27 +459,10 @@ def debug():
 <style>body{{background:#0d0d13;color:#e8e6f0;font-family:monospace;padding:28px;font-size:13px}}
 td,th{{padding:6px 10px;border-bottom:1px solid #2a2040;text-align:left}}</style></head><body>
 <h2>Massive data status</h2>
-<p>MASSIVE_API_KEY: {'set' if key_set else '<b style="color:#f87171">missing — add it in Railway Variables</b>'}<br>
+<p>MASSIVE_API_KEY: {'set' if key_set else '<b style="color:#f87171">missing, add it in Railway Variables</b>'}<br>
 Calls in the last minute: {md.calls_last_minute()} of {md._calls_per_min() or 'unlimited'}<br>
-Expected latest session: {md.expected_last_session()}<br>Cache folder: {md.CACHE_DIR}</p>
+Expected latest session: {md.expected_last_session()}<br>Cache folder: {md.CACHE_DIR}<br>
+Momentum universe: {len(momentum_universe())} cached names with a 12-1 return ({pe.MIN_UNIVERSE} needed)</p>
 <table><tr><th>Ticker</th><th>Bars</th><th>Range</th><th>Fetched</th><th>State</th></tr>{rows}</table>
 </body></html>"""
     return html, 200, {'Content-Type': 'text/html'}
-
-
-@api_bp.route('/fmp-test', methods=['GET'])
-def fmp_test():
-    import os, requests as req
-    fh_key = os.environ.get("FINNHUB_API_KEY","").strip()
-    fmp_key = os.environ.get("FMP_API_KEY","").strip()
-    out = [f"FINNHUB_API_KEY: {'SET (' + fh_key[:8] + '...)' if fh_key else 'NOT SET'}",
-           f"FMP_API_KEY: {'SET (' + fmp_key[:8] + '...)' if fmp_key else 'NOT SET'}", ""]
-    if fh_key:
-        try:
-            r = req.get(f"https://finnhub.io/api/v1/stock/price-target",
-                        params={"symbol":"AAPL","token":fh_key}, timeout=8)
-            out.append(f"Finnhub AAPL test: HTTP {r.status_code}")
-            out.append(r.text[:300])
-        except Exception as ex:
-            out.append(f"Finnhub error: {ex}")
-    return "<pre>" + "\n".join(out) + "</pre>", 200

@@ -31,7 +31,7 @@ except ImportError:
 
 API = "https://api.massive.com"
 ET = ZoneInfo("America/New_York")
-HISTORY_DAYS = 400                    # calendar days fetched: one year of returns plus a buffer
+HISTORY_DAYS = 725                    # calendar days fetched: two years of returns (12-1 momentum needs 253 bars)
 RECHECK_HOURS = 6                     # how long a fetch that found no newer bar is trusted (holidays)
 
 
@@ -117,7 +117,10 @@ def _get(path: str, params: dict, wait_max: float) -> dict:
     for attempt in range(2):
         if not _acquire(wait_max):
             raise RateLimited(path)
-        r = requests.get(API + path, params={**params, "apiKey": _key()}, timeout=20)
+        try:
+            r = requests.get(API + path, params={**params, "apiKey": _key()}, timeout=20)
+        except requests.RequestException as ex:
+            raise MassiveError(f"Could not reach Massive ({type(ex).__name__}).") from ex
         if r.status_code == 429 and attempt == 0:
             time.sleep(12)
             continue
@@ -125,8 +128,13 @@ def _get(path: str, params: dict, wait_max: float) -> dict:
             raise MassiveError(f"Massive refused the request (HTTP {r.status_code}). Check the key and plan.")
         if r.status_code == 429:
             raise RateLimited(path)
-        r.raise_for_status()
-        return r.json()
+        try:
+            r.raise_for_status()
+            return r.json()
+        except requests.HTTPError as ex:
+            raise MassiveError(f"Massive returned HTTP {r.status_code} for {path}.") from ex
+        except ValueError as ex:
+            raise MassiveError(f"Massive returned a non-JSON body for {path}.") from ex
     raise RateLimited(path)
 
 
@@ -144,6 +152,8 @@ def expected_last_session(now: dt.datetime | None = None) -> dt.date:
 
 
 def _fresh(entry: dict) -> bool:
+    if entry.get("history_days", 0) < HISTORY_DAYS:       # fetched with a shorter window: refetch once
+        return False
     bars = entry.get("bars") or []
     if bars and bars[-1][0] >= expected_last_session().isoformat():
         return True
@@ -155,15 +165,24 @@ def _path(ticker):
     return CACHE_DIR / f"bars_{massive_symbol(ticker).replace('.', '_')}.json"
 
 
+def _newer(a, b):
+    """Whichever cache entry was fetched later (ISO timestamps in ET compare as strings)."""
+    if not a:
+        return b
+    if not b:
+        return a
+    return b if str(b.get("fetched_at") or "") > str(a.get("fetched_at") or "") else a
+
+
 def _load(ticker):
-    if ticker in _mem:
-        return _mem[ticker]
     try:
-        entry = json.loads(_path(ticker).read_text())
-        _mem[ticker] = entry
-        return entry
+        disk = json.loads(_path(ticker).read_text())
     except (FileNotFoundError, ValueError):
-        return None
+        disk = None
+    entry = _newer(_mem.get(ticker), disk)
+    if entry is not None:
+        _mem[ticker] = entry
+    return entry
 
 
 def _fetch(ticker: str, wait_max: float) -> dict:
@@ -175,7 +194,8 @@ def _fetch(ticker: str, wait_max: float) -> dict:
     for b in body.get("results") or []:
         day = dt.datetime.fromtimestamp(b["t"] / 1000, ET).date().isoformat()
         bars.append([day, float(b["c"])])
-    entry = {"ticker": ticker, "fetched_at": dt.datetime.now(ET).isoformat(timespec="seconds"), "bars": bars}
+    entry = {"ticker": ticker, "fetched_at": dt.datetime.now(ET).isoformat(timespec="seconds"),
+             "history_days": HISTORY_DAYS, "bars": bars}
     _path(ticker).write_text(json.dumps(entry))
     _mem[ticker] = entry
     print(f"[massive] {ticker}: {len(bars)} daily bars, last {bars[-1][0] if bars else 'none'}")
@@ -302,6 +322,20 @@ def cache_status() -> list[dict]:
         bars = e.get("bars") or []
         out.append({"ticker": e.get("ticker"), "n": len(bars), "first": bars[0][0] if bars else None,
                     "last": bars[-1][0] if bars else None, "fetched_at": e.get("fetched_at"), "fresh": _fresh(e)})
+    return out
+
+
+def cached_bars() -> dict:
+    """{ticker: bars} for every ticker on disk, fresh or not. Real bars only, used to rank momentum."""
+    out = {}
+    for p in sorted(CACHE_DIR.glob("bars_*.json")):
+        try:
+            e = json.loads(p.read_text())
+        except ValueError:
+            continue
+        t = e.get("ticker")
+        if t and e.get("bars"):
+            out[t] = (_newer(_mem.get(t), e) or e)["bars"]
     return out
 
 

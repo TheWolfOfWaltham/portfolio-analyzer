@@ -1,69 +1,44 @@
-# Portfolio Analyzer — AI Infrastructure
+# Portfolio Analyzer
 
-A quantitative portfolio analysis web app built with Python Flask. Enter any tickers and your capital, and get institutional-grade risk analytics computed from Massive end-of-day price data.
+A Flask app that sizes a stock portfolio with mean-variance optimization, using real end-of-day prices only.
 
-## Features
+## Data
 
-- **Market data** from Massive daily bars, cached once per trading day. Tickers without real history are excluded, never estimated
-- **Mean-Variance Optimization** — Max Sharpe, Min Volatility, Risk Parity modes
-- **Efficient Frontier** — scatter plot of the optimal risk/return tradeoff curve
-- **Monte Carlo Simulation** — 200 paths, 3-year horizon, with 5th/25th/median/75th/95th percentile bands
-- **Correlation Matrix** — color-coded heatmap of pairwise return correlations
-- **Sector Diversification** — doughnut chart with automatic sector grouping
-- **Risk Contribution** — per-position percentage of total portfolio variance
-- **3-Year Scenario Analysis** — Bull/Base/Bear projections including biweekly DCA contribution compounding via annuity FV formula
-- **Smart Suggestions** — AI analyses your sector concentration and recommends complementary AI-infrastructure plays and uncorrelated blue-chip diversifiers
+Daily closes come from [Massive](https://massive.com) (`/v2/aggs`), about two years (725 calendar days) per ticker.
+Bars are cached on disk and refetched at most once per trading day, and a rate limiter keeps the app inside the
+Stocks Basic limit of 5 calls a minute. The risk-free rate is the latest 3-month Treasury yield from Massive.
+A ticker without real history is excluded and named in the response, never estimated.
+
+## Model
+
+- Anchor: `rf + beta_adj x 5.5%`, where `beta_adj = 0.67 x OLS beta vs SPY + 0.33` (Blume). Listings with under 180 days of overlap use a sector prior beta.
+- Momentum alpha: `0.05 x residual vol x z`, with z the 12-1 month return z-scored (clipped to +/-3) across every cached watchlist ticker. It switches off below 10 names, and the 0.05 is halved when SPY's own 12-1 return is negative.
+- Optional price targets you enter add `0.25 x ((target / price - 1 - 15%) - anchor)`.
+- Covariance is Ledoit-Wolf (2004) shrinkage toward constant correlation. Weights are long-only, between 0.5% and `max(40%, 1.5 / n)`.
 
 ## Setup
 
 ```bash
-git clone https://github.com/yourusername/portfolio-analyzer
-cd portfolio-analyzer
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python app.py
+cp .env.example .env      # then fill in MASSIVE_API_KEY
+python app.py             # http://localhost:8080 (PORT overrides)
 ```
 
-Open `http://localhost:5000` in your browser.
+Environment variables:
 
-## Project Structure
+| Name | Meaning |
+| --- | --- |
+| `MASSIVE_API_KEY` | Required. Massive key, Stocks Basic or higher. |
+| `MASSIVE_CALLS_PER_MIN` | Default 5. Set 0 on Starter or above to turn the rate limiter off. |
+| `CACHE_DIR` | Where price bars are cached. Point it at a Railway volume so the cache survives deploys. |
+| `ANTHROPIC_API_KEY` | Optional. Lets Claude propose smart-suggestion candidates, which are then scored on real prices. |
 
-```
-portfolio_app/
-├── app.py                  # Flask app factory
-├── portfolio_engine.py     # All quant logic (MVO, Monte Carlo, scenarios, smart DB)
-├── requirements.txt
-├── routes/
-│   ├── main.py             # Serves index.html
-│   └── api.py              # /api/analyze and /api/smart endpoints
-└── templates/
-    └── index.html          # Full SPA — Chart.js, vanilla JS, no framework needed
-```
+## Endpoints
 
-## API Reference
+- `POST /api/analyze` with `{tickers, capital, biweekly, mode, targets?}`. `mode` is `sharpe`, `minvol` or `riskparity`, and `targets` is an optional `{TICKER: price}`. Returns positions with the return breakdown, portfolio and equal-weight stats, frontier, Monte Carlo paths, scenarios and the covariance matrix. Answers 503 with `retry_after` while price history is still loading.
+- `POST /api/recalculate` reruns the optimizer and scenarios with your own return estimates, reusing the covariance matrix and betas from `/api/analyze`.
+- `POST /api/smart` with `{tickers, weights, user_prompt?}` suggests additions and scores each one on real data.
+- `GET /api/market-data` gives last close and daily change for the banner.
+- `GET /api/debug` shows the key status, rate limiter usage, momentum universe size and what is in the cache.
 
-### `POST /api/analyze`
-```json
-{
-  "tickers": ["GLW", "SNDK", "NBIS"],
-  "capital": 10000,
-  "biweekly": 500,
-  "mode": "sharpe"
-}
-```
-Returns: positions, portfolio stats, frontier, Monte Carlo paths, correlation matrix, scenario projections.
-
-### `POST /api/smart`
-```json
-{ "tickers": ["GLW", "SNDK"], "weights": [0.5, 0.5] }
-```
-Returns: complementary AI-infra picks, blue-chip diversifiers, concentration warnings.
-
-## Customisation
-
-All scenario return multipliers and the smart suggestions database live in `portfolio_engine.py`. Edit `SCENARIOS` and `SMART_DB` to update your forward views without touching any other file.
-
-## Disclaimer
-
-Not financial advice. For educational and analytical purposes only. Past performance does not guarantee future results.
+Not financial advice.

@@ -21,15 +21,6 @@
 html{background:transparent;min-height:100vh}
 body{font-family:'Space Grotesk',sans-serif;font-size:13px;color:var(--text);line-height:1.5;padding:0 0 80px;background:transparent}
 
-/* STARS */
-.stars-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.55}
-
-/* NAV */
-nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 32px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.nav-brand{font-size:13px;font-weight:800;letter-spacing:.1em;color:#fff;text-transform:uppercase}
-.nav-brand span{color:var(--purple-mid)}
-.nav-right{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace}
-
 /* HERO */
 .hero{background:var(--bg-deep);padding:52px 32px 44px;position:relative;overflow:hidden;border-bottom:1px solid #1e1830;z-index:1;text-align:center}
 .hero-geo{position:absolute;top:0;left:0;width:100%;height:100%;opacity:.12;pointer-events:none}
@@ -114,20 +105,11 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
 
 /* EXPOSURE BARS */
-.exposure-wrap{display:flex;flex-direction:column;gap:14px}
-.exposure-macro{margin-bottom:6px}
 .exposure-macro-bar{display:flex;height:52px;border-radius:10px;overflow:hidden;gap:3px;margin-bottom:8px;background:#000}
 .exp-seg{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px;background:#000;position:relative}
 .exp-seg:last-child{}
 .exp-seg-label{font-size:11px;font-weight:800;color:#fff;line-height:1;position:relative;z-index:1}
 .exp-seg-pct{font-size:10px;font-weight:700;color:rgba(255,255,255,.7);position:relative;z-index:1}
-.exposure-sub-label{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
-.sub-bars{display:flex;flex-direction:column;gap:5px}
-.sub-bar-row{display:flex;align-items:center;gap:10px}
-.sub-bar-label{font-size:11px;font-weight:700;color:var(--text-muted);width:140px;flex-shrink:0}
-.sub-bar-bg{flex:1;height:7px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden;border:0.5px solid rgba(255,255,255,0.10)}
-.sub-bar-fill{height:100%;border-radius:3px;border:0.5px solid rgba(255,255,255,0.32);box-sizing:border-box}
-.sub-bar-pct{font-size:11px;font-weight:700;width:36px;text-align:right;font-family:'DM Mono',monospace}
 
 /* POSITION TABLE */
 .pos-table{width:100%;border-collapse:collapse;font-size:12px}
@@ -136,7 +118,6 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .pos-table td{padding:10px 10px;border-bottom:1px solid rgba(42,32,64,.5)}
 .pos-table tr:last-child td{border-bottom:none}
 .pos-table tr:hover td{background:rgba(107,58,255,.04)}
-.ticker-cell{font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:13px}
 .tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px}
 .tag-high{background:rgba(248,113,113,.15);color:var(--red)}
 .tag-med{background:rgba(251,191,36,.15);color:var(--amber)}
@@ -178,7 +159,6 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .impact-pos{background:rgba(74,222,128,.12);color:var(--green);border:1px solid rgba(74,222,128,.2)}
 .impact-neg{background:rgba(248,113,113,.12);color:var(--red);border:1px solid rgba(248,113,113,.2)}
 .impact-neu{background:rgba(107,58,255,.12);color:var(--purple-mid);border:1px solid rgba(107,58,255,.2)}
-.smart-rationale{font-size:10px;color:var(--purple-mid);font-style:italic;margin-bottom:8px}
 .btn-add{background:var(--purple);color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Space Grotesk',sans-serif}
 .risk-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px 24px}
 .risk-panel-title{font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.12em;margin-bottom:14px}
@@ -186,15 +166,10 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 .risk-item:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
 .risk-item-header{font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:800;color:#fff;margin-bottom:3px}
 .risk-item-body{font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);line-height:1.5}
-.warning-item{display:none}
 
 #results{display:none}
 #results.visible{display:block}
 .note-bar{background:rgba(107,58,255,.1);border:1px solid rgba(107,58,255,.25);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--purple-mid);font-weight:600;margin-bottom:20px}
-.roth-display{background:rgba(107,58,255,0.07);border:1px solid rgba(107,58,255,0.2);border-radius:8px;padding:10px 14px;font-size:12px;margin-top:4px}
-.roth-row{display:flex;justify-content:space-between;font-weight:600;padding:3px 0;color:var(--text-muted)}
-.roth-row span:last-child{color:var(--text);font-family:'DM Mono',monospace}
-.roth-warn{font-size:10px;color:var(--amber);font-weight:600;margin-top:6px;padding-top:6px;border-top:1px solid rgba(251,191,36,.2)}
 .disclaimer{font-size:10px;color:var(--text-faint);text-align:center;padding:24px 32px;border-top:1px solid var(--border);max-width:1200px;margin:40px auto 0;line-height:1.7;font-weight:500}
 
 /* ── Nasdaq banner ── */
@@ -230,13 +205,11 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 /* ── Data source badge ── */
 .source-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;font-family:'DM Mono',monospace}
 .source-live{background:rgba(74,222,128,.12);color:var(--green)}
-.source-prior{background:rgba(248,113,113,.12);color:var(--red)}
 @media(max-width:900px){
   .hero-bubbles{grid-template-columns:1fr}
   .kpi-strip{grid-template-columns:repeat(3,1fr)}
   .charts-2,.scenario-grid,.smart-cols,.info-blocks{grid-template-columns:1fr}
   .main,.hero{padding-left:16px;padding-right:16px}
-  nav{padding:0 16px}
   .input-grid{grid-template-columns:1fr}
 }
 </style>
@@ -255,22 +228,22 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
   <div class="hero-geo"><div class="hero-geo-inner"></div></div>
   <div class="hero-eyebrow">Quantitative Portfolio Analysis</div>
   <h1>Build smarter.<br><em>Invest with conviction.</em></h1>
-  <p class="hero-sub">Real Sharpe ratios, Monte Carlo simulations, efficient frontiers — computed live from market data.</p>
+  <p class="hero-sub">Real Sharpe ratios, Monte Carlo simulations, and efficient frontiers, computed from real end-of-day prices.</p>
   <div class="info-blocks">
     <div class="info-block">
-      <div class="info-block-num">01 — Optimize</div>
+      <div class="info-block-num">01 / Optimize</div>
       <div class="info-block-title">Risk-reward optimization with institutional-grade tools</div>
       <div class="info-block-body">Maximize your Sharpe ratio, minimize portfolio volatility, or equalize risk contributions across every position with one click.</div>
     </div>
     <div class="info-block">
-      <div class="info-block-num">02 — Visualize</div>
+      <div class="info-block-num">02 / Visualize</div>
       <div class="info-block-title">See your returns across the efficient frontier</div>
       <div class="info-block-body">Plot your portfolio on the efficient frontier and run 200-path Monte Carlo simulations to understand the full range of 3-year outcomes.</div>
     </div>
     <div class="info-block">
-      <div class="info-block-num">03 — Expand</div>
+      <div class="info-block-num">03 / Expand</div>
       <div class="info-block-title">Discover complementary stocks with Smart Suggestions</div>
-      <div class="info-block-body">Hit Smart Suggestions to get AI-curated picks — adjacent AI infrastructure plays and blue-chip diversifiers that strengthen your book.</div>
+      <div class="info-block-body">Hit Smart Suggestions to get AI-curated picks: adjacent AI infrastructure plays and blue-chip diversifiers that strengthen your book.</div>
     </div>
   </div>
 </div>
@@ -281,7 +254,7 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
     <div class="input-grid">
       <div>
         <div class="field-group">
-          <div class="field-label">Tickers — press Enter or comma to add</div>
+          <div class="field-label">Tickers: press Enter or comma to add</div>
           <div class="ticker-row" id="tickerRow" onclick="document.getElementById('tickerField').focus()">
             <input id="tickerField" class="ticker-input-field" placeholder="e.g. NVDA, GLW, ANET…" autocomplete="off" autocapitalize="characters"/>
           </div>
@@ -320,7 +293,7 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" id="analyzeBtn" onclick="runAnalysis()">Analyze Portfolio</button>
-      <button class="btn btn-smart" onclick="runSmart()">✦ Smart Suggestions</button>
+      <button class="btn btn-smart" id="smartBtn" onclick="runSmart()">✦ Smart Suggestions</button>
       <button class="btn btn-outline" onclick="loadDefault()">Load My Portfolio</button>
       <button class="btn btn-outline" onclick="clearAll()">Clear</button>
     </div>
@@ -328,7 +301,7 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
 
   <div class="status-bar" id="statusBar">
     <div class="spinner"></div>
-    <span id="statusMsg">Fetching live market data…</span>
+    <span id="statusMsg">Fetching market data…</span>
   </div>
 
   <div id="riskPanel" style="display:none;margin-bottom:20px"></div>
@@ -343,17 +316,17 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
     </div>
     <div id="smartAnalysis" style="display:none;background:rgba(107,58,255,0.08);border:1px solid rgba(107,58,255,0.2);border-radius:8px;padding:10px 14px;font-size:12px;font-weight:500;color:var(--text-muted);margin-bottom:14px;font-style:italic"></div>
     <div style="display:flex;gap:8px;margin-bottom:16px">
-      <input id="smartPrompt" class="field-input-styled" placeholder="e.g. 'Find me nuclear energy exposure' or 'Low vol dividend payers' — leave blank for Claude's best judgment" style="flex:1;font-size:12px"/>
+      <input id="smartPrompt" class="field-input-styled" placeholder="e.g. 'Find me nuclear energy exposure' or 'Low vol dividend payers', or leave blank for Claude's best judgment" style="flex:1;font-size:12px"/>
       <button class="btn btn-smart" onclick="runSmart()" style="white-space:nowrap;flex-shrink:0">✦ Refine</button>
     </div>
     <div id="smartWarnings"></div>
     <div class="smart-cols">
       <div>
-        <div class="smart-col-title">✦ Sharpe Enhancers — highest risk-adjusted return lift</div>
+        <div class="smart-col-title">✦ Sharpe Enhancers: highest risk-adjusted return lift</div>
         <div id="smartComplements"></div>
       </div>
       <div>
-        <div class="smart-col-title">◈ Vol Reducers — lowest correlation, defensive diversifiers</div>
+        <div class="smart-col-title">◈ Vol Reducers: lowest correlation, defensive diversifiers</div>
         <div id="smartDiversifiers"></div>
       </div>
     </div>
@@ -391,22 +364,25 @@ nav{background:rgba(13,13,19,0.92);backdrop-filter:blur(12px);border-bottom:1px 
       <div class="section-title">Quantitative Risk Analysis</div>
       <div class="charts-2">
         <div class="chart-card"><h3>Efficient Frontier</h3><div style="position:relative;height:280px"><canvas id="frontierChart"></canvas></div></div>
-        <div class="chart-card"><h3>Monte Carlo — 3-Year Growth Paths (200 simulations)</h3><div style="position:relative;height:280px"><canvas id="mcChart"></canvas></div></div>
+        <div class="chart-card"><h3>Monte Carlo: 3-Year Growth Paths (200 simulations)</h3><div style="position:relative;height:280px"><canvas id="mcChart"></canvas></div></div>
       </div>
     </div>
 
     <div class="section">
-      <div class="section-title">3-Year Scenario Analysis — Bull → Base → Bear</div>
+      <div class="section-title">3-Year Scenario Analysis: Bull → Base → Bear</div>
       <div class="scenario-grid" id="scenarioGrid"></div>
     </div>
 
     <div class="section">
-      <div class="section-title">Position Breakdown — click headers to sort</div>
+      <div class="section-title">Position Breakdown: click headers to sort</div>
       <div class="chart-card" style="padding:0;overflow:hidden">
         <table class="pos-table" id="posTable"></table>
       </div>
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:10px">
-        <span style="font-size:11px;color:var(--text-dim);font-weight:500">Edit "Your Estimate" cells above then recalculate</span>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:10px;flex-wrap:wrap">
+        <span id="modelNote" style="font-size:11px;color:var(--text-dim);font-weight:500;flex:1;min-width:220px"></span>
+        <span style="font-size:11px;color:var(--text-dim);font-weight:500">Type your analyst targets and press Enter, or</span>
+        <button class="btn btn-outline" id="applyTargetsBtn" onclick="applyTargets()" style="padding:8px 18px;font-size:12px">Apply targets</button>
+        <span style="font-size:11px;color:var(--text-dim);font-weight:500">Edit "Your Estimate" cells then</span>
         <button class="btn btn-primary" id="recalcBtn" onclick="runRecalculate()" style="padding:8px 18px;font-size:12px">↺ Recalculate with my estimates</button>
       </div>
     </div>
